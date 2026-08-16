@@ -102,7 +102,28 @@
   }
 
   /* ---------------- Reading / Writing / Phrases stores ---------------- */
-  function getReading() { return Store.get(READ_KEY, { materials: [] }); }
+  function getReading() {
+    var d = Store.get(READ_KEY, { materials: [] });
+    if (!d || typeof d !== 'object') d = { materials: [] };
+    var changed = false;
+    (d.materials || []).forEach(function (m) {
+      (m.chapters || []).forEach(function (ch) {
+        if (Array.isArray(ch.pages)) {
+          var n = ch.pages.length;
+          var first = ch.pages[0] || {};
+          ch.pages = Math.max(1, n);
+          if (!ch.photo) ch.photo = first.photo || null;
+          if (!ch.audio) ch.audio = first.audio || null;
+          changed = true;
+        } else if (typeof ch.pages !== 'number') {
+          ch.pages = 1;
+          changed = true;
+        }
+      });
+    });
+    if (changed) Store.set(READ_KEY, d);
+    return d;
+  }
   function saveReading(d) { Store.set(READ_KEY, d); notifyChange(); }
   function getWriting() {
     var d = Store.get(WRITE_KEY, { entries: [] });
@@ -141,19 +162,15 @@
     return parts.join(' — ');
   }
   function readingTotals(reading) {
-    var total = 0, done = 0, inProgress = 0, practicedTimes = 0, minutes = 0;
-    (reading.materials || []).forEach(function (m) {
+    var r = reading || { materials: [] };
+    var total = 0, chapters = 0;
+    (r.materials || []).forEach(function (m) {
       (m.chapters || []).forEach(function (ch) {
-        (ch.pages || []).forEach(function (p) {
-          total++;
-          if (p.status === 'completed') done++;
-          else if (p.status === 'in-progress') inProgress++;
-          practicedTimes += p.practiced || 0;
-          minutes += p.totalMinutes || 0;
-        });
+        chapters++;
+        total += (typeof ch.pages === 'number' ? ch.pages : (ch.pages || []).length || 1);
       });
     });
-    return { total: total, done: done, inProgress: inProgress, practicedTimes: practicedTimes, minutes: minutes };
+    return { total: total, done: total, inProgress: 0, practicedTimes: 0, minutes: 0, chapters: chapters };
   }
   function writingTotals(writing) {
     var w = writing || { entries: [] };
@@ -385,7 +402,7 @@
       { icon: '🔥', label: 'Daily streak', value: streak + ' day' + (streak === 1 ? '' : 's'), sub: streak > 0 ? 'consecutive days' : 'start today', color: '#f59e0b' },
       { icon: '⏱️', label: 'Total practice', value: fmtMinutes(stats.totalMinutes), sub: stats.activeDays + ' active days', color: '#6366f1' },
       { icon: '💬', label: 'Phrases learned', value: String(getPhrases().length), sub: 'saved phrases', color: '#06b6d4' },
-      { icon: '📖', label: 'Pages read', value: rTot.done + ' / ' + rTot.total, sub: rTot.inProgress + ' in progress', color: '#f59e0b' },
+      { icon: '📖', label: 'Pages read', value: rTot.done, sub: rTot.chapters + ' chapters', color: '#f59e0b' },
       { icon: '✍️', label: 'Pages written', value: wTot.done, sub: wTot.total + ' total pages', color: '#ec4899' },
       { icon: '⭐', label: 'Avg score', value: stats.avgScore != null ? stats.avgScore + '/100' : '—', sub: 'self-rated sessions', color: '#10b981' }
     ];
@@ -444,20 +461,17 @@
     var cContinue = card('Continue where you left off', 'Pick up exactly where you stopped');
     var contList = el('div', 'recent-list');
     var found = 0;
-    (reading.materials || []).forEach(function (m) {
-      (m.chapters || []).forEach(function (ch) {
-        (ch.pages || []).forEach(function (p, pi) {
-          if (p.status === 'in-progress' && found < 1) {
-            found++;
-            var row = el('div', 'recent-row');
-            row.innerHTML = '<div class="recent-icon" style="background:#f59e0b18">📖</div>' +
-              '<div class="recent-main"><div class="recent-title">' + esc(pageLabel(m, ch, p, pi)) + '</div>' +
-              '<div class="recent-sub">practiced ' + (p.practiced || 0) + '× · ' + (p.totalMinutes || 0) + ' min</div></div>' +
-              '<div class="recent-side"><a class="btn ghost small" href="#/english/read?mat=' + m.id + '&page=' + p.id + '">Continue</a></div>';
-            contList.appendChild(row);
-          }
-        });
-      });
+    (reading.materials || []).slice().reverse().forEach(function (m) {
+      var chs = m.chapters || [];
+      var pg = 0;
+      chs.forEach(function (ch) { pg += (typeof ch.pages === 'number' ? ch.pages : (ch.pages || []).length || 1); });
+      found++;
+      var row = el('div', 'recent-row');
+      row.innerHTML = '<div class="recent-icon" style="background:#f59e0b18">📖</div>' +
+        '<div class="recent-main"><div class="recent-title">' + esc(m.title) + '</div>' +
+        '<div class="recent-sub">' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pg + ' page' + (pg === 1 ? '' : 's') + '</div></div>' +
+        '<div class="recent-side"><a class="btn ghost small" href="#/english/read?mat=' + m.id + '">Continue</a></div>';
+      contList.appendChild(row);
     });
     (writing.entries || []).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }).forEach(function (x) {
       if (found >= 2) return;
@@ -973,7 +987,7 @@
       '<span class="chip">🗓️ Active days <b>' + stats.activeDays + '</b></span>' +
       '<span class="chip">⭐ Avg score <b>' + (stats.avgScore != null ? stats.avgScore + '/100' : '—') + '</b></span>' +
       '<span class="chip">💬 Phrases <b>' + getPhrases().length + '</b></span>' +
-      '<span class="chip">📖 Pages read <b>' + rTot.done + '/' + rTot.total + '</b></span>' +
+      '<span class="chip">📖 Pages read <b>' + rTot.done + '</b></span>' +
       '<span class="chip">✍️ Pages written <b>' + wTot.done + '</b></span>';
     wrap.appendChild(chips);
 
@@ -1024,13 +1038,19 @@
 
     /* materials progress */
     var row3 = el('div', 'grid-2');
-    var cRead = card('Reading materials', 'Pages completed across your books and stories');
+    var cRead = card('Reading log', 'Your books and stories');
     var rl = el('div', 'mat-list');
     if (!(reading.materials || []).length) rl.appendChild(el('p', 'cell-muted', 'No reading materials yet.'));
     (reading.materials || []).forEach(function (m) {
-      var t = 0, d = 0;
-      (m.chapters || []).forEach(function (ch) { (ch.pages || []).forEach(function (p) { t++; if (p.status === 'completed') d++; }); });
-      rl.appendChild(matRow(m.title, m.type, d, t, m.id, '#/english/read'));
+      var chs = m.chapters || [];
+      var pg = 0;
+      chs.forEach(function (ch) { pg += (typeof ch.pages === 'number' ? ch.pages : (ch.pages || []).length || 1); });
+      var row = el('div', 'mat-card');
+      row.innerHTML = '<div class="mat-emoji">📖</div>' +
+        '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>' +
+        '<div class="mat-meta">' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pg + ' page' + (pg === 1 ? '' : 's') + '</div></div>' +
+        '<div class="mat-actions"><a class="btn ghost small" href="#/english/read">Open</a></div>';
+      rl.appendChild(row);
     });
     cRead.appendChild(rl);
     row3.appendChild(cRead);
