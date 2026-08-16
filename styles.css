@@ -583,3 +583,10 @@ table.records tbody tr:hover { background: #fafbff; }
 .row-media-add { padding: 2px 10px !important; font-size: 12px !important; }
 .row-media-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 .row-media-audio { max-width: 160px; height: 30px; }
+
+/* Read Aloud — flat one-page layout */
+.read-mat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 4px; }
+.read-mat-title { font-weight: 700; font-size: 15px; }
+.read-mat-meta { padding: 0 16px 10px; color: #6b7280; font-size: 13px; }
+.ch-form { margin: 6px 12px 14px; padding: 12px 0 0; border-top: 1px dashed #e5e7eb; }
+.ch-form .media-attach { margin-top: 10px; }

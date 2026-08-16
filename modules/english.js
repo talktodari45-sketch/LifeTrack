@@ -470,7 +470,7 @@
       row.innerHTML = '<div class="recent-icon" style="background:#f59e0b18">📖</div>' +
         '<div class="recent-main"><div class="recent-title">' + esc(m.title) + '</div>' +
         '<div class="recent-sub">' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pg + ' page' + (pg === 1 ? '' : 's') + '</div></div>' +
-        '<div class="recent-side"><a class="btn ghost small" href="#/english/read?mat=' + m.id + '">Continue</a></div>';
+        '<div class="recent-side"><a class="btn ghost small" href="#/english/read">Continue</a></div>';
       contList.appendChild(row);
     });
     (writing.entries || []).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }).forEach(function (x) {

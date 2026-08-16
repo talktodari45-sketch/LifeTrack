@@ -1,7 +1,6 @@
 /* ============================================================
-   LifeTrack — English Learning · Read Aloud (simple log)
-   Material: title + type. Chapters: title, pages, photo/audio.
-   No page editor — keep it simple.
+   LifeTrack — English Learning · Read Aloud (flat, no inside page)
+   Everything on one view: materials, chapters, pages, media.
    ============================================================ */
 (function () {
   'use strict';
@@ -13,8 +12,7 @@
   var el = H.el, toast = H.toast;
 
   var TYPES = { book: 'Book', story: 'Story', article: 'Article' };
-  var openMatId = null;
-  var editChId = null;
+  var editChKey = null; /* 'matId::chId' while editing a chapter */
 
   function pageCount(ch) {
     if (typeof ch.pages === 'number') return Math.max(1, ch.pages);
@@ -22,60 +20,16 @@
   }
 
   function readView(view) {
-    var q = {};
-    var hq = location.hash.split('?')[1];
-    if (hq) hq.split('&').forEach(function (kv) { var p = kv.split('='); if (p.length === 2) q[p[0]] = decodeURIComponent(p[1]); });
-    openMatId = q.mat || null;
-
     var reading = E.getReading();
     var wrap = el('div', 'view-body');
     var head = el('div', 'page-head');
-    head.innerHTML = '<h1>Read Aloud 📖</h1><p>Log the books and stories you read aloud: chapters, pages, and a photo or recording.</p>';
+    head.innerHTML = '<h1>Read Aloud 📖</h1><p>Books, stories, chapters, pages and recordings — all on one page, no opening anything.</p>';
     wrap.appendChild(head);
 
-    if (openMatId) {
-      renderMaterial(wrap, reading);
-    } else {
-      renderList(wrap, reading);
-    }
-    view.appendChild(wrap);
-  }
-
-  /* ---------- List ---------- */
-  function renderList(wrap, reading) {
-    var list = el('div', 'mat-list');
-    if (!(reading.materials || []).length) {
-      list.appendChild(el('p', 'cell-muted', 'No materials yet — create your first book or story below.'));
-    }
-    (reading.materials || []).forEach(function (m) {
-      var chs = m.chapters || [];
-      var pages = 0;
-      chs.forEach(function (ch) { pages += pageCount(ch); });
-      var card = el('div', 'mat-card');
-      card.innerHTML =
-        '<div class="mat-emoji">📖</div>' +
-        '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>' +
-        '<div class="mat-meta">' + (TYPES[m.type] || 'Material') + ' · ' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pages + ' page' + (pages === 1 ? '' : 's') + '</div></div>' +
-        '<div class="mat-actions">' +
-        '<button class="btn primary small btn-open">Open</button>' +
-        '<button class="btn danger small btn-del">Delete</button></div>';
-      card.querySelector('.btn-open').addEventListener('click', function () { location.hash = '#/english/read?mat=' + m.id; });
-      card.querySelector('.btn-del').addEventListener('click', function () {
-        if (!window.confirm('Delete "' + m.title + '" and all its chapters?')) return;
-        var d = E.getReading();
-        d.materials = d.materials.filter(function (x) { return x.id !== m.id; });
-        E.saveReading(d);
-        toast('Material deleted');
-        LT.render();
-      });
-      list.appendChild(card);
-    });
-    wrap.appendChild(list);
-
-    /* add material */
+    /* new material */
     var form = el('form', 'card form-card');
     form.innerHTML =
-      '<h2>New material</h2><div class="card-sub">Create a book, story or article — then add chapters.</div>' +
+      '<h2>New material</h2><div class="card-sub">Create a book, story or article — chapters go right inside it below.</div>' +
       '<div class="form-grid">' +
       '  <label class="span2">Title<input name="title" type="text" required placeholder="e.g. English Stories, My News Article"></label>' +
       '  <label>Type<select name="type"><option value="story">Story</option><option value="book">Book</option><option value="article">Article</option></select></label>' +
@@ -92,89 +46,53 @@
       LT.render();
     });
     wrap.appendChild(form);
+
+    /* materials with inline chapters */
+    var list = el('div', 'mat-list');
+    if (!(reading.materials || []).length) {
+      list.appendChild(el('p', 'cell-muted', 'No materials yet — create your first book or story above.'));
+    }
+    (reading.materials || []).forEach(function (m) {
+      list.appendChild(renderMaterialCard(m));
+    });
+    wrap.appendChild(list);
+    view.appendChild(wrap);
   }
 
-  /* ---------- Material detail: chapters ---------- */
-  function renderMaterial(wrap, reading) {
-    var m = null;
-    (reading.materials || []).forEach(function (x) { if (x.id === openMatId) m = x; });
-    if (!m) { openMatId = null; renderList(wrap, reading); return; }
-
+  function renderMaterialCard(m) {
     var chs = m.chapters || [];
     var pages = 0;
     chs.forEach(function (ch) { pages += pageCount(ch); });
-
-    var back = el('a', 'btn ghost small', '← All materials');
-    back.href = '#/english/read';
-    wrap.appendChild(el('div', 'head-row', null)).appendChild(back);
-
-    var summary = el('div', 'card');
-    summary.innerHTML = '<h2>' + esc(m.title) + '</h2>' +
-      '<div class="card-sub">' + (TYPES[m.type] || 'Material') + ' · ' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pages + ' page' + (pages === 1 ? '' : 's') + '</div>';
-    wrap.appendChild(summary);
-
-    /* add / edit chapter */
-    var editing = editChId ? (chs.find(function (x) { return x.id === editChId; }) || null) : null;
-    var chForm = el('form', 'card form-card');
-    chForm.innerHTML = '<h2 id="cf-title">Add chapter</h2><div class="card-sub">Chapter title, how many pages, plus a photo or recording.</div>' +
-      '<div class="form-grid">' +
-      '  <label>Chapter title<input name="title" type="text" required placeholder="e.g. The Lucky Coin"></label>' +
-      '  <label>Pages<input name="pages" type="number" min="1" max="500" value="1"></label>' +
-      '</div>' +
-      '<div class="form-actions"><button class="btn primary" type="submit">💾 Save chapter</button>' +
-      '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
-    var chPhoto = E.media.mediaAttach(editing ? editing.photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
-    var chAudio = E.media.mediaAttach(editing ? editing.audio : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
-    chForm.appendChild(chPhoto.el);
-    chForm.appendChild(chAudio.el);
-    wrap.appendChild(chForm);
-
-    var cf = chForm;
-    cf.title.value = editing ? editing.title : '';
-    cf.pages.value = editing ? pageCount(editing) : 1;
-    if (editing) {
-      cf.querySelector('#cf-title').textContent = 'Edit chapter';
-      cf.querySelector('#btn-cancel').style.display = '';
+    var editing = null, editingMat = false;
+    if (editChKey && editChKey.indexOf(m.id + '::') === 0) {
+      editingMat = true;
+      var cid = editChKey.slice(m.id.length + 2);
+      chs.forEach(function (ch) { if (ch.id === cid) editing = ch; });
     }
-    cf.querySelector('#btn-cancel').addEventListener('click', function () { editChId = null; LT.render(); });
-    cf.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var title = cf.title.value.trim() || 'Chapter ' + (chs.length + 1);
-      var n = Math.max(1, parseInt(cf.pages.value, 10) || 1);
-      Promise.all([chPhoto.resolve(editing ? editing.photo : null), chAudio.resolve(editing ? editing.audio : null)]).then(function (res) {
-        var d = E.getReading();
-        var target = null;
-        d.materials.forEach(function (x) { if (x.id === m.id) target = x; });
-        if (!target) { toast('Material not found'); return; }
-        var ch = { id: editChId || uid(), title: title, pages: n, photo: res[0], audio: res[1] };
-        if (editChId) {
-          target.chapters = (target.chapters || []).map(function (c) { return c.id === editChId ? ch : c; });
-          toast('Chapter updated');
-        } else {
-          target.chapters = (target.chapters || []).concat([ch]);
-          toast('Chapter saved');
-        }
-        E.saveReading(d);
-        E.upsertRefRecord('reading-chapter', ch.id, {
-          date: todayISO(), activity: 'readAloud',
-          duration: 0, topic: m.title + ' — ' + ch.title,
-          notes: n + (n === 1 ? ' page' : ' pages'),
-          status: 'done', score: null, createdAt: Date.now()
-        });
-        editChId = null;
-        LT.render();
-      });
+
+    var card = el('div', 'card');
+    var head = el('div', 'read-mat-head');
+    head.innerHTML = '<span class="read-mat-title">📖 ' + esc(m.title) + '</span>';
+    var delMat = el('button', 'btn danger small', 'Delete');
+    delMat.addEventListener('click', function () {
+      if (!window.confirm('Delete "' + m.title + '" and all its chapters?')) return;
+      var d = E.getReading();
+      d.materials = d.materials.filter(function (x) { return x.id !== m.id; });
+      E.saveReading(d);
+      if (editChKey && editChKey.indexOf(m.id + '::') === 0) editChKey = null;
+      toast('Material deleted');
+      LT.render();
     });
+    head.appendChild(delMat);
+    card.appendChild(head);
+    card.appendChild(el('div', 'read-mat-meta', (TYPES[m.type] || 'Material') + ' · ' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pages + ' page' + (pages === 1 ? '' : 's')));
 
-    /* chapter list */
-    if (!chs.length) {
-      wrap.appendChild(el('p', 'cell-muted', 'No chapters yet — add one above.'));
-    }
+    /* chapters */
     chs.forEach(function (ch) {
       var block = el('div', 'chapter-block');
-      var head = el('div', 'chapter-head');
-      head.innerHTML = '<span class="chev">▶</span><span>' + esc(ch.title) + '</span><span class="ch-meta">' + pageCount(ch) + ' pages</span>';
-      block.appendChild(head);
+      var chHead = el('div', 'chapter-head');
+      chHead.innerHTML = '<span class="chev">▶</span><span>' + esc(ch.title) + '</span><span class="ch-meta">' + pageCount(ch) + ' pages</span>';
+      block.appendChild(chHead);
       var body = el('div', 'chapter-body');
       var row = el('div', 'page-row');
       var main = el('div', 'p-main');
@@ -197,8 +115,8 @@
       row.appendChild(main);
       var actions = el('div', 'row-actions');
       var btnEdit = el('button', 'btn ghost small', 'Edit');
-      btnEdit.addEventListener('click', function () { editChId = ch.id; LT.render(); });
-      var btnDel = el('button', 'btn danger small', 'Delete');
+      btnEdit.addEventListener('click', function () { editChKey = m.id + '::' + ch.id; LT.render(); });
+      var btnDel = el('button', 'btn danger small', 'Delete chapter');
       btnDel.addEventListener('click', function () {
         if (!window.confirm('Delete this chapter?')) return;
         var d = E.getReading();
@@ -207,7 +125,7 @@
           x.chapters = (x.chapters || []).filter(function (c) { return c.id !== ch.id; });
         });
         E.saveReading(d);
-        if (editChId === ch.id) editChId = null;
+        if (editChKey === m.id + '::' + ch.id) editChKey = null;
         toast('Chapter deleted');
         LT.render();
       });
@@ -216,8 +134,63 @@
       row.appendChild(actions);
       body.appendChild(row);
       block.appendChild(body);
-      wrap.appendChild(block);
+      card.appendChild(block);
     });
+    if (!chs.length) {
+      card.appendChild(el('p', 'cell-muted', 'No chapters yet — add one below.'));
+    }
+
+    /* inline add / edit chapter */
+    var chForm = el('form', 'ch-form');
+    chForm.innerHTML = '<div class="form-grid">' +
+      '  <label>' + (editingMat ? 'Chapter title' : 'Add chapter') + '<input name="title" type="text" required placeholder="e.g. The Lucky Coin"></label>' +
+      '  <label>Pages<input name="pages" type="number" min="1" max="500" value="1"></label>' +
+      '</div>' +
+      '<div class="form-actions">' +
+      '<button class="btn primary" type="submit">' + (editingMat ? '💾 Save chapter' : '➕ Add chapter') + '</button>' +
+      (editingMat ? '<button class="btn ghost" type="button" id="btn-cancel">Cancel</button>' : '') +
+      '</div>';
+    var chPhoto = E.media.mediaAttach(editing ? editing.photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
+    var chAudio = E.media.mediaAttach(editing ? editing.audio : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    chForm.appendChild(chPhoto.el);
+    chForm.appendChild(chAudio.el);
+    card.appendChild(chForm);
+
+    var cf = chForm;
+    cf.title.value = editing ? editing.title : '';
+    cf.pages.value = editing ? pageCount(editing) : 1;
+    var cancelBtn = cf.querySelector('#btn-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () { editChKey = null; LT.render(); });
+    cf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var title = cf.title.value.trim() || 'Chapter ' + (chs.length + 1);
+      var n = Math.max(1, parseInt(cf.pages.value, 10) || 1);
+      Promise.all([chPhoto.resolve(editing ? editing.photo : null), chAudio.resolve(editing ? editing.audio : null)]).then(function (res) {
+        var d = E.getReading();
+        var target = null;
+        d.materials.forEach(function (x) { if (x.id === m.id) target = x; });
+        if (!target) { toast('Material not found'); return; }
+        var ch = { id: editing ? editing.id : uid(), title: title, pages: n, photo: res[0], audio: res[1] };
+        if (editing) {
+          target.chapters = (target.chapters || []).map(function (c) { return c.id === ch.id ? ch : c; });
+          toast('Chapter updated');
+        } else {
+          target.chapters = (target.chapters || []).concat([ch]);
+          toast('Chapter saved');
+        }
+        E.saveReading(d);
+        E.upsertRefRecord('reading-chapter', ch.id, {
+          date: todayISO(), activity: 'readAloud',
+          duration: 0, topic: m.title + ' — ' + ch.title,
+          notes: n + (n === 1 ? ' page' : ' pages'),
+          status: 'done', score: null, createdAt: Date.now()
+        });
+        editChKey = null;
+        LT.render();
+      });
+    });
+
+    return card;
   }
 
   LT.extendModule('english', {
