@@ -32,7 +32,6 @@
   var WRITE_KEY = 'english.writing';
   var PHRASE_KEY = 'english.phrases';
   var SET_KEY = 'english.settings';
-  var SEED_KEY = 'english.seeded';
 
   var ACTIVITIES = {
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
@@ -105,7 +104,26 @@
   /* ---------------- Reading / Writing / Phrases stores ---------------- */
   function getReading() { return Store.get(READ_KEY, { materials: [] }); }
   function saveReading(d) { Store.set(READ_KEY, d); notifyChange(); }
-  function getWriting() { return Store.get(WRITE_KEY, { materials: [] }); }
+  function getWriting() {
+    var d = Store.get(WRITE_KEY, { entries: [] });
+    if (!d || typeof d !== 'object') d = { entries: [] };
+    if (d.materials && !d.entries) {
+      var migrated = [];
+      (d.materials || []).forEach(function (m) {
+        (m.pages || []).forEach(function (p, pi) {
+          migrated.push({
+            id: p.id || uid(), title: m.title + (((m.pages || []).length > 1) ? ' \u2014 Page ' + (pi + 1) : ''),
+            pages: 1, date: p.date || null, timeSpent: p.timeSpent || 0,
+            photo: p.photo || null, createdAt: p.createdAt || Date.now()
+          });
+        });
+      });
+      d = { entries: migrated };
+      Store.set(WRITE_KEY, d);
+    }
+    if (!d.entries) d.entries = [];
+    return d;
+  }
   function saveWriting(d) { Store.set(WRITE_KEY, d); notifyChange(); }
   function getPhrases() { return Store.get(PHRASE_KEY, []); }
   function savePhrases(list) { Store.set(PHRASE_KEY, list); notifyChange(); }
@@ -138,16 +156,11 @@
     return { total: total, done: done, inProgress: inProgress, practicedTimes: practicedTimes, minutes: minutes };
   }
   function writingTotals(writing) {
-    var total = 0, done = 0, inProgress = 0, words = 0;
-    (writing.materials || []).forEach(function (m) {
-      (m.pages || []).forEach(function (p) {
-        total++;
-        if (p.status === 'completed') done++;
-        else if (p.status === 'in-progress') inProgress++;
-        words += p.wordCount || 0;
-      });
-    });
-    return { total: total, done: done, inProgress: inProgress, words: words };
+    var w = writing || { entries: [] };
+    var entries = w.entries || [];
+    var total = 0, minutes = 0;
+    entries.forEach(function (x) { total += (x.pages || 1); minutes += (x.timeSpent || 0); });
+    return { total: total, done: total, inProgress: 0, words: 0, count: entries.length, minutes: minutes };
   }
 
   /* ---------------- Stats ---------------- */
@@ -301,7 +314,7 @@
       '<div class="recent-icon" style="background:' + a.color + '18">' + a.icon + '</div>' +
       '<div class="recent-main"><div class="recent-title">' + esc(a.label + modeTxt) +
       (r.status === 'partial' ? ' <span class="st-chip st-in-progress">partial</span>' : '') +
-      '</div><div class="recent-sub">' + esc(fmtDate(r.date)) + (sub ? ' · ' + sub : '') + '</div></div>' +
+      '</div><div class="recent-sub">' + esc(fmtDate(r.date)) + (sub ? ' · ' + sub : '') + (r.media ? ' · 📎 ' + (r.mediaType === 'audio' ? 'audio' : 'photo') : '') + '</div></div>' +
       '<div class="recent-side"><div class="v">' + sideParts.join(' · ') + '</div>' +
       '<div class="s">' + (r.status === 'done' || !r.status ? '✅' : '') + '</div></div>';
     if (opts) {
@@ -342,7 +355,6 @@
      VIEW: Dashboard
      ============================================================ */
   function dashboard(view) {
-    seedDemo(false);
     var list = getRecords();
     var stats = computeStats(list);
     var streak = computeStreak(list);
@@ -363,9 +375,7 @@
     wrap.appendChild(head);
 
     if (!list.length && !getPhrases().length) {
-      var demoBtn = el('button', 'btn primary', 'Load demo data');
-      demoBtn.addEventListener('click', function () { seedDemo(true); toast('Demo journal loaded'); LT.render(); });
-      emptyState(wrap, 'Welcome to your English journal', 'Log speaking, listening, reading, writing and phrases — every session becomes a real learning record.', [demoBtn]);
+      emptyState(wrap, 'Welcome to your English journal', 'Log speaking, listening, reading, writing and phrases — every session becomes a real learning record.');
       view.appendChild(wrap);
       return;
     }
@@ -376,7 +386,7 @@
       { icon: '⏱️', label: 'Total practice', value: fmtMinutes(stats.totalMinutes), sub: stats.activeDays + ' active days', color: '#6366f1' },
       { icon: '💬', label: 'Phrases learned', value: String(getPhrases().length), sub: 'saved phrases', color: '#06b6d4' },
       { icon: '📖', label: 'Pages read', value: rTot.done + ' / ' + rTot.total, sub: rTot.inProgress + ' in progress', color: '#f59e0b' },
-      { icon: '✍️', label: 'Pages written', value: wTot.done + ' / ' + wTot.total, sub: wTot.words + ' words total', color: '#ec4899' },
+      { icon: '✍️', label: 'Pages written', value: wTot.done, sub: wTot.total + ' total pages', color: '#ec4899' },
       { icon: '⭐', label: 'Avg score', value: stats.avgScore != null ? stats.avgScore + '/100' : '—', sub: 'self-rated sessions', color: '#10b981' }
     ];
     var grid = el('div', 'stat-grid');
@@ -449,18 +459,15 @@
         });
       });
     });
-    (writing.materials || []).forEach(function (m) {
-      (m.pages || []).forEach(function (p, pi) {
-        if (p.status === 'in-progress' && found < 2) {
-          found++;
-          var row = el('div', 'recent-row');
-          row.innerHTML = '<div class="recent-icon" style="background:#ec489918">✍️</div>' +
-            '<div class="recent-main"><div class="recent-title">' + esc(m.title + ' — Page ' + (pi + 1)) + '</div>' +
-            '<div class="recent-sub">' + (p.prompt ? esc(p.prompt.length > 50 ? p.prompt.slice(0, 50) + '…' : p.prompt) : '') + '</div></div>' +
-            '<div class="recent-side"><a class="btn ghost small" href="#/english/write?mat=' + m.id + '&page=' + p.id + '">Write</a></div>';
-          contList.appendChild(row);
-        }
-      });
+    (writing.entries || []).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }).forEach(function (x) {
+      if (found >= 2) return;
+      found++;
+      var row = el('div', 'recent-row');
+      row.innerHTML = '<div class="recent-icon" style="background:#ec489918">✍️</div>' +
+        '<div class="recent-main"><div class="recent-title">' + esc(x.title) + '</div>' +
+        '<div class="recent-sub">' + (x.pages || 1) + ' page' + ((x.pages || 1) === 1 ? '' : 's') + ' · ' + (x.date ? fmtDate(x.date) : '') + '</div></div>' +
+        '<div class="recent-side"><a class="btn ghost small" href="#/english/write">Write</a></div>';
+      contList.appendChild(row);
     });
     if (!found) contList.appendChild(el('p', 'cell-muted', 'No in-progress material — start one from Read Aloud or Writing.'));
     cContinue.appendChild(contList);
@@ -538,6 +545,8 @@
       '<div class="form-actions"><button class="btn primary" type="submit">💾 Save session</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
+    var speakMedia = mediaAttach(speakEditId ? (list.find(function (r) { return r.id === speakEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    form.appendChild(speakMedia.el);
 
     var log = el('div', 'card');
     log.appendChild(el('div', 'card-head', '<h2>Session history</h2>'));
@@ -587,18 +596,21 @@
       e.preventDefault();
       var dur = parseInt(f.duration.value, 10);
       if (!f.date.value || !f.topic.value.trim() || !dur || dur < 1) { toast('Date, topic and duration are required'); return; }
-      var rec = {
-        id: speakEditId || uid(), date: f.date.value,
-        activity: 'speaking', mode: f.mode.value,
-        duration: dur, topic: f.topic.value.trim(),
-        notes: f.notes.value.trim(), status: f.status.value,
-        score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
-        createdAt: Date.now()
-      };
-      if (speakEditId) { updateRecord(speakEditId, rec); toast('Session updated'); }
-      else { addRecord(rec); toast('Session saved'); }
-      speakEditId = null;
-      LT.render();
+      speakMedia.resolve(speakEditId ? (list.find(function (r) { return r.id === speakEditId; }) || {}).media : null).then(function (media) {
+        var rec = {
+          id: speakEditId || uid(), date: f.date.value,
+          activity: 'speaking', mode: f.mode.value,
+          duration: dur, topic: f.topic.value.trim(),
+          notes: f.notes.value.trim(), status: f.status.value,
+          score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
+          media: media, mediaType: media ? 'audio' : null,
+          createdAt: Date.now()
+        };
+        if (speakEditId) { updateRecord(speakEditId, rec); toast('Session updated'); }
+        else { addRecord(rec); toast('Session saved'); }
+        speakEditId = null;
+        LT.render();
+      });
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { speakEditId = null; LT.render(); });
   }
@@ -711,6 +723,8 @@
       '<div class="form-actions"><button class="btn primary" type="submit">💾 Save session</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
+    var listenMedia = mediaAttach(listenEditId ? (list.find(function (r) { return r.id === listenEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    form.appendChild(listenMedia.el);
 
     var log = el('div', 'card');
     log.appendChild(el('h2', null, 'Session history'));
@@ -747,17 +761,20 @@
       e.preventDefault();
       var dur = parseInt(f.duration.value, 10);
       if (!f.date.value || !f.topic.value.trim() || !dur || dur < 1) { toast('Date, material and duration are required'); return; }
-      var rec = {
-        id: listenEditId || uid(), date: f.date.value, activity: 'listen',
-        duration: dur, topic: f.topic.value.trim(), notes: f.notes.value.trim(),
-        status: f.status.value,
-        score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
-        createdAt: Date.now()
-      };
-      if (listenEditId) { updateRecord(listenEditId, rec); toast('Session updated'); }
-      else { addRecord(rec); toast('Session saved'); }
-      listenEditId = null;
-      LT.render();
+      listenMedia.resolve(listenEditId ? (list.find(function (r) { return r.id === listenEditId; }) || {}).media : null).then(function (media) {
+        var rec = {
+          id: listenEditId || uid(), date: f.date.value, activity: 'listen',
+          duration: dur, topic: f.topic.value.trim(), notes: f.notes.value.trim(),
+          status: f.status.value,
+          score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
+          media: media, mediaType: media ? 'audio' : null,
+          createdAt: Date.now()
+        };
+        if (listenEditId) { updateRecord(listenEditId, rec); toast('Session updated'); }
+        else { addRecord(rec); toast('Session saved'); }
+        listenEditId = null;
+        LT.render();
+      });
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { listenEditId = null; LT.render(); });
   }
@@ -944,9 +961,7 @@
     wrap.appendChild(head);
 
     if (!list.length && !getPhrases().length) {
-      var demoBtn = el('button', 'btn primary', 'Load demo data');
-      demoBtn.addEventListener('click', function () { seedDemo(true); toast('Demo journal loaded'); LT.render(); });
-      emptyState(wrap, 'No data yet', 'Start logging practice sessions to see progress charts.', [demoBtn]);
+      emptyState(wrap, 'No data yet', 'Start logging practice sessions to see progress charts.');
       view.appendChild(wrap);
       return;
     }
@@ -959,7 +974,7 @@
       '<span class="chip">⭐ Avg score <b>' + (stats.avgScore != null ? stats.avgScore + '/100' : '—') + '</b></span>' +
       '<span class="chip">💬 Phrases <b>' + getPhrases().length + '</b></span>' +
       '<span class="chip">📖 Pages read <b>' + rTot.done + '/' + rTot.total + '</b></span>' +
-      '<span class="chip">✍️ Pages written <b>' + wTot.done + '/' + wTot.total + '</b></span>';
+      '<span class="chip">✍️ Pages written <b>' + wTot.done + '</b></span>';
     wrap.appendChild(chips);
 
     var segRow = el('div', 'head-row');
@@ -1020,13 +1035,16 @@
     cRead.appendChild(rl);
     row3.appendChild(cRead);
 
-    var cWrite = card('Writing materials', 'Pages written across your writing projects');
+    var cWrite = card('Writing log', 'Your writing sessions');
     var wl = el('div', 'mat-list');
-    if (!(writing.materials || []).length) wl.appendChild(el('p', 'cell-muted', 'No writing materials yet.'));
-    (writing.materials || []).forEach(function (m) {
-      var t = 0, d = 0;
-      (m.pages || []).forEach(function (p) { t++; if (p.status === 'completed') d++; });
-      wl.appendChild(matRow(m.title, 'writing', d, t, m.id, '#/english/write'));
+    if (!(writing.entries || []).length) wl.appendChild(el('p', 'cell-muted', 'No writing entries yet.'));
+    (writing.entries || []).slice().sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); }).slice(0, 8).forEach(function (x) {
+      var row = el('div', 'mat-card');
+      row.innerHTML = '<div class="mat-emoji">✍️</div>' +
+        '<div class="mat-main"><div class="mat-title">' + esc(x.title) + '</div>' +
+        '<div class="mat-meta">' + (x.pages || 1) + ' page' + ((x.pages || 1) === 1 ? '' : 's') + ' · ' + (x.date ? fmtDate(x.date) : 'no date') + ' · ' + (x.timeSpent ? fmtMinutes(x.timeSpent) : '— time') + '</div></div>' +
+        '<div class="mat-actions"><a class="btn ghost small" href="#/english/write">Open</a></div>';
+      wl.appendChild(row);
     });
     cWrite.appendChild(wl);
     row3.appendChild(cWrite);
@@ -1107,13 +1125,12 @@
     var toolsRow = el('div', 'tools-row');
     var bExport = el('button', 'btn ghost small', '⬇️ Export JSON');
     var bImport = el('button', 'btn ghost small', '⬆️ Import JSON');
-    var bDemo = el('button', 'btn ghost small', '✨ Load demo data');
     var bClear = el('button', 'btn danger small', '🗑️ Clear all data');
     var fileInput = el('input', null);
     fileInput.type = 'file';
     fileInput.accept = 'application/json,.json';
     fileInput.style.display = 'none';
-    toolsRow.appendChild(bExport); toolsRow.appendChild(bImport); toolsRow.appendChild(bDemo); toolsRow.appendChild(bClear);
+    toolsRow.appendChild(bExport); toolsRow.appendChild(bImport); toolsRow.appendChild(bClear);
     dCard.appendChild(toolsRow);
     dCard.appendChild(fileInput);
     wrap.appendChild(dCard);
@@ -1149,14 +1166,14 @@
         try {
           var data = JSON.parse(reader.result);
           var records = Array.isArray(data) ? data : (data.records || []);
-          var reading = (data && data.reading) || { materials: [] };
-          var writing = (data && data.writing) || { materials: [] };
+          var reading = (data && data.reading) || { entries: [] };
+          var writing = (data && data.writing) || { entries: [] };
           var phrases = (data && data.phrases) || [];
           var settings = (data && data.settings) || {};
           if (!window.confirm('Replace current data (' + getRecords().length + ' records, ' + getPhrases().length + ' phrases) with the imported backup?')) return;
           saveRecords(records); saveReading(reading); saveWriting(writing);
           savePhrases(phrases); saveGoals(Object.assign({}, DEFAULT_GOALS, settings));
-          Store.set(SEED_KEY, true);
+
           toast('Backup imported');
           LT.render();
         } catch (err) {
@@ -1166,11 +1183,10 @@
       reader.readAsText(file);
       fileInput.value = '';
     });
-    bDemo.addEventListener('click', function () { seedDemo(true); toast('Demo data loaded'); LT.render(); });
     bClear.addEventListener('click', function () {
       if (!window.confirm('Delete ALL records, materials, phrases and settings? This cannot be undone.')) return;
-      saveRecords([]); saveReading({ materials: [] }); saveWriting({ materials: [] });
-      savePhrases([]); Store.set(SEED_KEY, true);
+      saveRecords([]); saveReading({ materials: [] }); saveWriting({ entries: [] });
+      savePhrases([]);
       toast('All data cleared');
       LT.render();
     });
@@ -1179,185 +1195,176 @@
   /* ============================================================
      Demo data
      ============================================================ */
-  function seedDemo(force) {
-    if (!force && Store.get(SEED_KEY, false)) return false;
-    var today = todayISO();
-    function rnd(n) { return Math.floor(Math.random() * n); }
-    function pick(arr) { return arr[rnd(arr.length)]; }
-    var records = [];
-    var speakTopics = [
-      ['My morning routine', 'Could describe the steps but struggled with "kettle" — learned it!'],
-      ['Weekend plans', 'Talked about going to the park and meeting friends.'],
-      ['My favorite movie', 'Ran out of words describing the plot — need more storytelling vocab.'],
-      ['Food I cooked this week', 'Pasta and vegetables — was able to explain the recipe.'],
-      ['My job in one paragraph', 'Said the main ideas but kept pausing for the right words.'],
-      ['A book I am reading', 'Explained the characters, mixed up past tenses a few times.'],
-      ['Describe my room', 'Simple but smooth — no major issues.'],
-      ['Plans after work today', 'Felt natural, used going-to future correctly.'],
-      ['My commute', 'Talked about traffic and the train delay.'],
-      ['Hobbies and why I like them', 'Good flow, learned the phrase "wind down".']
-    ];
-    var listenMats = [
-      'BBC 6 Minute English — Why we forget',
-      'TED talk — The power of vulnerability',
-      'News clip — local weather report',
-      'Podcast: All Ears English — small talk',
-      'English song lyrics shadowing',
-      'YouTube — how to make espresso at home'
-    ];
-    var thinkNotes = [
-      'Described my to-do list mentally. Easy.',
-      'Thought about lunch in English. Forgot the word "cucumber".',
-      'Planned the evening in English while walking.',
-      'Inner monologue about the meeting. Felt slow but complete.',
-      'Narrated my commute. Smooth today.'
-    ];
-    var rndRecord = function (daysAgo, act, overrides) {
-      var r = Object.assign({
-        id: uid(), date: addDays(today, -daysAgo), activity: act,
-        createdAt: Date.now() - daysAgo * 86400000 - rnd(6) * 3600000
-      }, overrides || {});
-      return r;
-    };
+  /* ---------------- Media attachment helpers (optional) ---------------- */
+  function fileToDataUrl(file, maxBytes) {
+    return new Promise(function (resolve, reject) {
+      if (!file) { resolve(null); return; }
+      if (maxBytes && file.size > maxBytes) { reject(new Error('File too large — max ' + Math.round(maxBytes / 1024 / 1024) + ' MB')); return; }
+      var fr = new FileReader();
+      fr.onload = function () { resolve(fr.result); };
+      fr.onerror = function () { reject(new Error('Could not read file')); };
+      fr.readAsDataURL(file);
+    });
+  }
+  function compressImage(file, maxDim, quality) {
+    return new Promise(function (resolve, reject) {
+      if (!file) { resolve(null); return; }
+      if (file.type.indexOf('image') !== 0) { reject(new Error('Not an image file')); return; }
+      var fr = new FileReader();
+      fr.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          if (scale === 1 && file.size <= 300 * 1024) { resolve(fr.result); return; }
+          var w = Math.max(1, Math.round(img.width * scale));
+          var h = Math.max(1, Math.round(img.height * scale));
+          var cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          try { resolve(cv.toDataURL('image/jpeg', quality || 0.72)); }
+          catch (e) { resolve(fr.result); }
+        };
+        img.onerror = function () { reject(new Error('Could not read image')); };
+        img.src = fr.result;
+      };
+      fr.onerror = function () { reject(new Error('Could not read file')); };
+      fr.readAsDataURL(file);
+    });
+  }
+  function mediaAttach(current, opts) {
+    /* Compact media-tile UI: dashed add button + thumbnail/player tile with remove */
+    var wrap2 = el('div', 'media-attach');
+    var state = { value: current || null, removed: false };
 
-    /* speaking sessions ~4/week */
-    for (var i = 48; i >= 0; i--) {
-      if (rnd(7) >= 4) continue;
-      var st = pick(speakTopics);
-      records.push(rndRecord(i, 'speaking', {
-        mode: rnd(10) === 0 ? 'ai' : (rnd(10) === 0 ? 'person' : 'solo'),
-        duration: 10 + rnd(6) * 2, topic: st[0], notes: st[1],
-        status: 'done', score: 62 + rnd(36)
-      }));
+    var tiles = el('div', 'media-tiles');
+    var row = el('div', 'media-row');
+    var addBtn = el('button', 'btn ghost small media-add', opts.kind === 'photo' ? '📷 Add photo' : '🎤 Add audio');
+    addBtn.type = 'button';
+    var input = el('input', null);
+    input.type = 'file';
+    input.accept = opts.accept || '*/*';
+    input.style.display = 'none';
+    addBtn.appendChild(input);
+    row.appendChild(addBtn);
+    var hint = el('span', 'media-hint', opts.hint || (opts.kind === 'photo' ? 'Optional — attach a photo' : 'Optional — attach a recording'));
+    row.appendChild(hint);
+
+    function render() {
+      tiles.innerHTML = '';
+      if (!state.value) return;
+      var tile = el('div', 'media-tile');
+      if (opts.kind === 'photo') {
+        var im = el('img', null);
+        im.src = state.value;
+        im.alt = 'Attached photo';
+        tile.appendChild(im);
+        var meta = el('div', 'media-meta');
+        meta.appendChild(el('div', 'media-name', 'Photo'));
+        meta.appendChild(el('div', 'media-sub', 'Saved with this entry'));
+        tile.appendChild(meta);
+      } else {
+        var au = el('audio', null);
+        au.controls = true;
+        au.src = state.value;
+        tile.appendChild(au);
+        var meta2 = el('div', 'media-meta');
+        meta2.appendChild(el('div', 'media-name', 'Audio recording'));
+        meta2.appendChild(el('div', 'media-sub', 'Saved with this entry'));
+        tile.appendChild(meta2);
+      }
+      var rm = el('button', 'btn danger small', '✕ Remove');
+      rm.type = 'button';
+      rm.addEventListener('click', function () { state.value = null; state.removed = true; render(); });
+      tile.appendChild(rm);
+      tiles.appendChild(tile);
     }
-    /* think entries */
-    for (var j = 50; j >= 0; j--) {
-      if (rnd(5) >= 4) continue;
-      records.push(rndRecord(j, 'think', { topic: 'Daily thinking', notes: pick(thinkNotes), status: 'done' }));
-    }
-    /* listen sessions */
-    for (var k = 50; k >= 0; k--) {
-      if (rnd(7) >= 3) continue;
-      records.push(rndRecord(k, 'listen', {
-        duration: 12 + rnd(5) * 4, topic: pick(listenMats),
-        notes: rnd(3) === 0 ? 'Shadowed the speaker for the last 5 minutes.' : '',
-        status: 'done', score: 60 + rnd(38)
-      }));
-    }
-    /* reading material */
-    var stories = {
-      id: uid(), title: 'English Stories', type: 'story',
-      chapters: [
-        { id: uid(), title: 'The Lucky Coin', pages: [] },
-        { id: uid(), title: 'A Rainy Day', pages: [] },
-        { id: uid(), title: 'The Old Bakery', pages: [] }
-      ]
-    };
-    var storyTexts = [
-      'Emma found a shiny coin on the pavement. She picked it up and smiled. "My lucky day," she said.',
-      'The coin had a strange symbol on one side. Emma turned it over and over, wondering where it came from.',
-      'That evening, Emma told her brother Leo about the coin. Leo laughed. "Coins do not bring luck," he said.',
-      'The next morning, Emma lost her bus ticket. She searched her pockets and found the coin instead.',
-      'Emma decided to walk to school. On the way, she saw a small bakery she had never noticed before.',
-      'The bakery smelled of fresh bread. Emma bought a warm roll with the lucky coin.',
-      'Inside the roll, Emma found a small note. It said: "Good things come to those who look."',
-      'Emma kept the note in her book. Every time she felt unlucky, she read it again.',
-      'Years later, Emma became a writer. The note stayed on her desk, a reminder of that rainy morning.',
-      'And the coin? Emma gave it to her own daughter, with the same smile she had worn that day.'
-    ];
-    var chIdx = 0;
-    storyTexts.forEach(function (txt, si) {
-      if (stories.chapters[chIdx].pages.length >= 4) chIdx++;
-      stories.chapters[chIdx].pages.push({
-        id: uid(), text: txt,
-        status: si < 6 ? 'completed' : (si === 6 ? 'in-progress' : 'not-started'),
-        practiced: si < 6 ? 2 + rnd(3) : (si === 6 ? 1 : 0),
-        lastDate: si < 6 ? addDays(today, -(rnd(20) + 3)) : (si === 6 ? addDays(today, -1) : null),
-        totalMinutes: si < 6 ? 8 + rnd(4) * 2 : (si === 6 ? 6 : 0),
-        notes: ''
+    render();
+
+    addBtn.addEventListener('click', function (e) { e.preventDefault(); input.click(); });
+    input.addEventListener('change', function () {
+      var fl = input.files[0];
+      if (!fl) return;
+      var work = opts.kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, (opts.maxBytes || 2) * 1024 * 1024);
+      work.then(function (dataUrl) {
+        state.value = dataUrl;
+        state.removed = false;
+        render();
+      }).catch(function (err) {
+        toast(err.message || 'Could not read file');
+        input.value = '';
       });
     });
-    var reading = { materials: [stories] };
-    /* reading records — walk the flat page list (pages span multiple chapters) */
-    var flatPages = [];
-    stories.chapters.forEach(function (ch) {
-      ch.pages.forEach(function (p) { flatPages.push({ ch: ch, p: p }); });
-    });
-    for (var m = 0; m < Math.min(8, flatPages.length); m++) {
-      var fpg = flatPages[m];
-      records.push(rndRecord(40 - m * 5, 'readAloud', {
-        duration: 6 + rnd(4), topic: 'English Stories — ' + fpg.ch.title + ' — Page ' + (m + 1),
-        status: fpg.p.status === 'completed' ? 'done' : 'partial',
-        ref: { type: 'reading-page', id: fpg.p.id }
-      }));
-    }
-    var inProgPage = flatPages.find(function (f) { return f.p.status === 'in-progress'; }) || flatPages[0];
-    records.push(rndRecord(1, 'readAloud', {
-      duration: 6, topic: 'English Stories — ' + inProgPage.ch.title + ' — Page ' + (flatPages.indexOf(inProgPage) + 1),
-      status: 'partial', ref: { type: 'reading-page', id: inProgPage.p.id }
-    }));
 
-    /* writing material */
-    var routine = {
-      id: uid(), title: 'My Daily Routine', type: 'writing',
-      pages: [
-        { id: uid(), prompt: 'Describe your morning from waking up to leaving home.', original: 'I wake up at 7 o\'clock. I brush my teeth and wash my face. I make coffee and drink it with bread. I check my phone for messages. Then I go to work by train.', date: addDays(today, -12), wordCount: 38, timeSpent: 12, corrections: 'Use "have breakfast" instead of "drink coffee with bread". "By train" → "by the train" is unnecessary; "by train" is correct.', improved: 'I wake up at 7 o\'clock. I brush my teeth and wash my face. I have breakfast — coffee and toast. I check my phone for messages. Then I go to work by train.', notes: 'Short sentences are fine. Work on connectors like "after that".', status: 'completed' },
-        { id: uid(), prompt: 'Write about what you do at work in the afternoon.', original: 'At work I answer emails and join meetings. After lunch I write a report. Sometimes I talk with my team about the project. I finish at 6 o\'clock.', date: addDays(today, -6), wordCount: 33, timeSpent: 15, corrections: '"Talk with my team about" — good! Try "discuss the project with my team".', improved: 'At work I answer emails and join meetings. After lunch I write a report. Sometimes I discuss the project with my team. I finish at 6 o\'clock.', notes: 'Good progress. Watch out for "join meetings" → "attend meetings".', status: 'completed' },
-        { id: uid(), prompt: 'Describe your evening routine and how you relax.', original: 'In the evening I cook dinner. After dinner I watch a series or read a book. I study English for thirty minutes. I go to bed at 11.', date: addDays(today, -1), wordCount: 27, timeSpent: 9, corrections: '', improved: '', notes: 'Need to expand — describe what you cook and what you watch.', status: 'in-progress' }
-      ]
+    wrap2.appendChild(tiles);
+    wrap2.appendChild(row);
+    return {
+      el: wrap2,
+      resolve: function (previous) {
+        if (state.removed) return Promise.resolve(null);
+        if (state.value) return Promise.resolve(state.value);
+        return Promise.resolve(previous || null);
+      }
     };
-    var writing = { materials: [routine] };
-    records.push(rndRecord(12, 'writing', { duration: 12, topic: 'My Daily Routine — Page 1', status: 'done', ref: { type: 'writing-page', id: routine.pages[0].id } }));
-    records.push(rndRecord(6, 'writing', { duration: 15, topic: 'My Daily Routine — Page 2', status: 'done', ref: { type: 'writing-page', id: routine.pages[1].id } }));
-    records.push(rndRecord(1, 'writing', { duration: 9, topic: 'My Daily Routine — Page 3', status: 'in-progress', ref: { type: 'writing-page', id: routine.pages[2].id } }));
-
-    /* phrases */
-    var phraseSeed = [
-      ['How is it going?', 'A friendly way to ask how someone is.', 'Hey! How is it going?'],
-      ['I am running late.', 'You will arrive after the agreed time.', 'Sorry, I am running late — the train was delayed.'],
-      ['Sounds good to me.', 'You agree with a suggestion.', 'Dinner at 7? Sounds good to me.'],
-      ['Let me get back to you.', 'You will answer later.', 'I need to check my calendar — let me get back to you.'],
-      ['That makes sense.', 'Something is logical or clear.', 'Ah, now that makes sense.'],
-      ['I am looking forward to it.', 'You are excited about something in the future.', 'I am looking forward to the trip!'],
-      ['Could you say that again?', 'Polite way to ask for repetition.', 'Sorry, could you say that again?'],
-      ['It depends.', 'The answer changes based on the situation.', 'Do you like tea or coffee? It depends.'],
-      ['No worries.', 'It is not a problem.', 'You forgot the meeting? No worries.'],
-      ['I will keep that in mind.', 'You will remember that advice.', 'Good tip — I will keep that in mind.'],
-      ['Long time no see.', 'You meet someone after a long time.', 'Hey Alex! Long time no see.'],
-      ['Take your time.', 'There is no rush.', 'Read the email slowly — take your time.'],
-      ['That is a good point.', 'You agree with an argument.', 'That is a good point, I had not thought of that.'],
-      ['I am on my way.', 'You are traveling to the place now.', 'Wait for me, I am on my way.'],
-      ['By the way...', 'You add a side note to the conversation.', 'By the way, did you see the news?'],
-      ['What do you mean?', 'Ask for clarification.', 'What do you mean by "flexible schedule"?'],
-      ['It is up to you.', 'The other person decides.', 'Where should we eat? It is up to you.'],
-      ['I will do my best.', 'You will try hard.', 'This is a hard task, but I will do my best.'],
-      ['Never mind.', 'It is not important anymore.', 'I forgot what I wanted to say — never mind.'],
-      ['Keep in touch.', 'Stay in contact.', 'It was great seeing you — keep in touch!'],
-      ['I am not sure yet.', 'You have not decided.', 'Will you join us? I am not sure yet.'],
-      ['That explains it.', 'Now you understand the reason.', 'The bus was late — that explains it.'],
-      ['What a coincidence!', 'Two things happened by chance.', 'You are also from Mumbai? What a coincidence!'],
-      ['I could not agree more.', 'You strongly agree.', 'The ending was perfect — I could not agree more.'],
-      ['Have a great day!', 'A kind goodbye wish.', 'Thanks for your help — have a great day!']
-    ];
-    var phrases = [];
-    phraseSeed.forEach(function (p, pi) {
-      var learned = addDays(today, -Math.floor((phraseSeed.length - pi) * 1.4) - rnd(2));
-      phrases.push({
-        id: uid(), phrase: p[0], meaning: p[1], example: p[2],
-        notes: '', learned: learned, lastReview: rnd(3) === 0 ? learned : null,
-        reviews: rnd(3), status: rnd(3) === 0 ? 'learned' : 'learning'
+  }
+  /* Compact per-row media bar (list views): photo/audio attach with inline preview */
+  function rowMediaBar(opts) {
+    var bar = el('div', 'row-media-bar');
+    var state = { photo: opts.photo || null, audio: opts.audio || null };
+    function fire() { opts.onChange({ photo: state.photo, audio: state.audio }); }
+    function addBtn(label, kind, accept) {
+      var b = el('button', 'btn ghost small row-media-add', label);
+      b.type = 'button';
+      var inp = el('input', null);
+      inp.type = 'file';
+      inp.accept = accept;
+      inp.style.display = 'none';
+      b.appendChild(inp);
+      b.addEventListener('click', function (e) { e.preventDefault(); inp.click(); });
+      inp.addEventListener('change', function () {
+        var fl = inp.files[0];
+        if (!fl) return;
+        var work = kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, 2 * 1024 * 1024);
+        work.then(function (d) {
+          if (kind === 'photo') state.photo = d; else state.audio = d;
+          inp.value = '';
+          render();
+          fire();
+        }).catch(function (err) {
+          toast(err.message || 'Could not read file');
+          inp.value = '';
+        });
       });
-    });
-    /* make sure today has at least 3 phrases (goal visible) */
-    phrases.slice(0, 3).forEach(function (p) { p.learned = today; });
-
-    saveRecords(records);
-    saveReading(reading);
-    saveWriting(writing);
-    savePhrases(phrases);
-    saveGoals(DEFAULT_GOALS);
-    Store.set(SEED_KEY, true);
-    return true;
+      return b;
+    }
+    function render() {
+      bar.innerHTML = '';
+      if (state.photo) {
+        var im = el('img', 'row-media-thumb', null);
+        im.src = state.photo;
+        im.alt = 'Photo';
+        var xp = el('button', 'btn danger small', '✕');
+        xp.type = 'button';
+        xp.addEventListener('click', function () { state.photo = null; render(); fire(); });
+        bar.appendChild(im);
+        bar.appendChild(xp);
+      } else {
+        bar.appendChild(addBtn('📷', 'photo', 'image/*'));
+      }
+      if (state.audio) {
+        var au = el('audio', 'row-media-audio', null);
+        au.controls = true;
+        au.src = state.audio;
+        var xa = el('button', 'btn danger small', '✕');
+        xa.type = 'button';
+        xa.addEventListener('click', function () { state.audio = null; render(); fire(); });
+        bar.appendChild(au);
+        bar.appendChild(xa);
+      } else if (opts.allowAudio) {
+        bar.appendChild(addBtn('🎤', 'audio', 'audio/*'));
+      }
+    }
+    render();
+    return bar;
   }
 
   /* ---------------- Public data layer (for other module files + AI features) ---------------- */
@@ -1365,7 +1372,7 @@
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,
     DEFAULT_GOALS: DEFAULT_GOALS,
     REC_KEY: REC_KEY, READ_KEY: READ_KEY, WRITE_KEY: WRITE_KEY,
-    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, SEED_KEY: SEED_KEY,
+    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, 
     act: act,
     getRecords: getRecords, saveRecords: saveRecords,
     addRecord: addRecord, updateRecord: updateRecord, deleteRecord: deleteRecord,
@@ -1378,8 +1385,8 @@
     readingTotals: readingTotals, writingTotals: writingTotals,
     computeStats: computeStats, computeStreak: computeStreak,
     bucketize: bucketize, dayMap: dayMap, phrasesByDay: phrasesByDay,
-    seedDemo: seedDemo,
-    ui: { card: card, emptyState: emptyState, statusChip: statusChip, scoreChip: scoreChip, goalRow: goalRow, recordRow: recordRow, buildHeatmap: buildHeatmap, legendHTML: legendHTML }
+    ui: { card: card, emptyState: emptyState, statusChip: statusChip, scoreChip: scoreChip, goalRow: goalRow, recordRow: recordRow, buildHeatmap: buildHeatmap, legendHTML: legendHTML },
+    media: { fileToDataUrl: fileToDataUrl, compressImage: compressImage, mediaAttach: mediaAttach, rowMediaBar: rowMediaBar }
   };
 
   /* ---------------- Register module ---------------- */

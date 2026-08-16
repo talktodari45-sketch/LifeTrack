@@ -150,7 +150,7 @@
       var n = Math.max(1, Math.min(50, parseInt(chForm.pages.value, 10) || 1));
       var ch = { id: uid(), title: title, pages: [] };
       for (var i = 0; i < n; i++) {
-        ch.pages.push({ id: uid(), text: '', status: 'not-started', practiced: 0, lastDate: null, totalMinutes: 0, notes: '' });
+        ch.pages.push({ id: uid(), text: '', status: 'not-started', practiced: 0, lastDate: null, totalMinutes: 0, notes: '', photo: null, audio: null });
       }
       var d = E.getReading();
       d.materials.forEach(function (x) { if (x.id === m.id) x.chapters.push(ch); });
@@ -178,12 +178,30 @@
         prow.innerHTML =
           '<div class="p-num">' + (pi + 1) + '</div>' +
           '<div class="p-main"><div class="p-title">' + (p.text ? esc(p.text.slice(0, 60)) + (p.text.length > 60 ? '…' : '') : 'Empty page') + '</div>' +
-          '<div class="p-meta">practiced ' + (p.practiced || 0) + '× · ' + (p.totalMinutes || 0) + ' min · last ' + last + '</div></div>' +
+          '<div class="p-meta">practiced ' + (p.practiced || 0) + '× · ' + (p.totalMinutes || 0) + ' min · last ' + last + (p.photo ? ' · 🖼' : '') + (p.audio ? ' · 🎤' : '') + '</div>' +
+          (p.notes ? '<div class="p-notes">' + esc(p.notes.slice(0, 90)) + (p.notes.length > 90 ? '…' : '') + '</div>' : '') +
+          '</div>' +
           '<div class="p-side">' + E.ui.statusChip(p.status).outerHTML + '</div>' +
           '<div class="row-actions"><button class="btn ghost small btn-practice">Practice</button></div>';
         prow.querySelector('.btn-practice').addEventListener('click', function () {
           location.hash = '#/english/read?mat=' + m.id + '&page=' + p.id;
         });
+        var bar = E.media.rowMediaBar({
+          photo: p.photo || null,
+          audio: p.audio || null,
+          allowAudio: true,
+          onChange: function (patch) {
+            var d = E.getReading();
+            d.materials.forEach(function (mx) {
+              (mx.chapters || []).forEach(function (cx) {
+                (cx.pages || []).forEach(function (px) { if (px.id === p.id) { px.photo = patch.photo; px.audio = patch.audio; } });
+              });
+            });
+            E.saveReading(d);
+            toast('Attachment saved');
+          }
+        });
+        prow.querySelector('.p-main').appendChild(bar);
         body.appendChild(prow);
       });
       var addPageBtn = el('button', 'btn ghost small', '+ Add page');
@@ -193,7 +211,7 @@
         d.materials.forEach(function (x) {
           if (x.id !== m.id) return;
           (x.chapters || []).forEach(function (c) {
-            if (c.id === ch.id) c.pages.push({ id: uid(), text: '', status: 'not-started', practiced: 0, lastDate: null, totalMinutes: 0, notes: '' });
+            if (c.id === ch.id) c.pages.push({ id: uid(), text: '', status: 'not-started', practiced: 0, lastDate: null, totalMinutes: 0, notes: '', photo: null, audio: null });
           });
         });
         E.saveReading(d);
@@ -230,7 +248,7 @@
 
     var titleCard = el('div', 'card');
     titleCard.innerHTML = '<h2>' + esc(m.title + ' — ' + ch.title) + '</h2>' +
-      '<div class="card-sub">Practiced ' + (p.practiced || 0) + '× · ' + (p.totalMinutes || 0) + ' min total · last ' + (p.lastDate ? fmtDate(p.lastDate) : 'never') + ' · status: ' + esc(p.status.replace('-', ' ')) + '</div>';
+      '<div class="card-sub">Practiced ' + (p.practiced || 0) + '× · ' + (p.totalMinutes || 0) + ' min total · last ' + (p.lastDate ? fmtDate(p.lastDate) : 'never') + ' · status: ' + esc(p.status.replace('-', ' ')) + (p.photo ? ' · 🖼 photo' : '') + (p.audio ? ' · 🎤 audio' : '') + '</div>';
     wrap.appendChild(titleCard);
 
     if (p.text) {
@@ -297,6 +315,10 @@
     eform.querySelector('[name=text]').value = p.text || '';
     eform.querySelector('[name=status]').value = p.status;
     eform.querySelector('[name=notes]').value = p.notes || '';
+    var rdPhoto = E.media.mediaAttach(p.photo || null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
+    var rdAudio = E.media.mediaAttach(p.audio || null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    eform.appendChild(rdPhoto.el);
+    eform.appendChild(rdAudio.el);
     var saveEdit = el('button', 'btn ghost small', '💾 Save page');
     saveEdit.addEventListener('click', function () {
       var d = E.getReading();
@@ -307,12 +329,16 @@
         });
       });
       if (!target) { toast('Page not found'); return; }
-      target.text = eform.querySelector('[name=text]').value;
-      target.status = eform.querySelector('[name=status]').value;
-      target.notes = eform.querySelector('[name=notes]').value.trim();
-      E.saveReading(d);
-      toast('Page saved');
-      LT.render();
+      Promise.all([rdPhoto.resolve(target.photo || null), rdAudio.resolve(target.audio || null)]).then(function (res) {
+        target.text = eform.querySelector('[name=text]').value;
+        target.status = eform.querySelector('[name=status]').value;
+        target.notes = eform.querySelector('[name=notes]').value.trim();
+        target.photo = res[0];
+        target.audio = res[1];
+        E.saveReading(d);
+        toast('Page saved');
+        LT.render();
+      });
     });
     editCard.appendChild(eform);
     editCard.appendChild(el('div', 'form-actions', null)).appendChild(saveEdit);

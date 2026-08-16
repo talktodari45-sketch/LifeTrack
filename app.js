@@ -17,7 +17,7 @@
       } catch (e) { return fallback; }
     },
     set: function (key, value) {
-      try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(value)); } catch (e) { /* storage full */ }
+      try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(value)); } catch (e) { try { toast('Storage full — free up space or remove large attachments'); } catch (_) { /* noop */ } }
     },
     remove: function (key) {
       try { localStorage.removeItem(LS_PREFIX + key); } catch (e) { /* ignore */ }

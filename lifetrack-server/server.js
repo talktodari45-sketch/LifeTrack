@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    LifeTrack -- MongoDB sync server (Atlas-ready)
    Bridges the LifeTrack web app (even the hosted FC version,
    via CORS) to MongoDB Atlas or any MongoDB server.
@@ -88,7 +88,7 @@ function readBody(req) {
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > 20 * 1024 * 1024) { reject(new Error('Body too large')); req.destroy(); return; }
+      if (size > 64 * 1024 * 1024) { reject(new Error('Body too large')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => {

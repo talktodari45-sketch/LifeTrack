@@ -46,6 +46,8 @@
       '<div class="form-actions"><button class="btn primary" type="submit">➕ Save phrase</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
+    var phPhoto = E.media.mediaAttach(phraseEditId ? (phrases.find(function (p) { return p.id === phraseEditId; }) || {}).photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
+    form.appendChild(phPhoto.el);
 
     /* list */
     var learning = phrases.filter(function (p) { return p.status !== 'learned'; });
@@ -84,11 +86,14 @@
       var phrase = f.phrase.value.trim();
       var meaning = f.meaning.value.trim();
       if (!phrase || !meaning) { toast('Phrase and meaning are required'); return; }
+      var prevPhoto = phraseEditId ? (E.getPhrases().find(function (p) { return p.id === phraseEditId; }) || {}).photo : null;
+      phPhoto.resolve(prevPhoto).then(function (photo) {
       if (phraseEditId) {
         var list = E.getPhrases().map(function (p) {
           if (p.id !== phraseEditId) return p;
           p.phrase = phrase; p.meaning = meaning;
           p.example = f.example.value.trim(); p.notes = f.notes.value.trim();
+          p.photo = photo;
           return p;
         });
         E.savePhrases(list);
@@ -100,7 +105,8 @@
       var np = {
         id: uid(), phrase: phrase, meaning: meaning,
         example: f.example.value.trim(), notes: f.notes.value.trim(),
-        learned: todayISO(), lastReview: null, reviews: 0, status: 'learning'
+        learned: todayISO(), lastReview: null, reviews: 0, status: 'learning',
+        photo: photo
       };
       E.savePhrases(E.getPhrases().concat([np]));
       E.addRecord({
@@ -110,6 +116,7 @@
       });
       toast('Phrase saved — ' + (learnedToday + 1) + ' today');
       LT.render();
+      });
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { phraseEditId = null; LT.render(); });
   }
@@ -118,7 +125,7 @@
     var card = el('div', 'phrase-card');
     card.innerHTML =
       '<div class="phrase-main">' +
-      '<div class="phrase-text">' + esc(p.phrase) + '</div>' +
+      '<div class="phrase-text">' + esc(p.phrase) + '</div>' + (p.photo ? '<img src="' + p.photo + '" alt="Phrase photo" style="max-width:200px;max-height:150px;border-radius:10px;border:1px solid var(--line);margin-top:6px;display:block">' : '') +
       '<div class="phrase-meaning">' + esc(p.meaning) + '</div>' +
       (p.example ? '<div class="phrase-example">" ' + esc(p.example) + ' "</div>' : '') +
       (p.notes ? '<div class="phrase-example">📌 ' + esc(p.notes) + '</div>' : '') +
