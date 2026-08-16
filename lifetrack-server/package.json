@@ -1,0 +1,14 @@
+{
+  "name": "lifetrack-local-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local MongoDB sync server for the LifeTrack English Learning journal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node check.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.8.0"
+  }
+}
