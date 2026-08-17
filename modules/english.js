@@ -27,11 +27,11 @@
   var toast = H.toast, el = H.el;
 
   /* ---------------- Storage keys & config ---------------- */
-  var REC_KEY = '***';
-  var READ_KEY = '***';
-  var WRITE_KEY = '***';
-  var PHRASE_KEY = '***';
-  var SET_KEY = '***';
+  var REC_KEY = 'english.records';
+  var READ_KEY = 'english.reading';
+  var WRITE_KEY = 'english.writing';
+  var PHRASE_KEY = 'english.phrases';
+  var SET_KEY = 'english.settings';
 
   var ACTIVITIES = {
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
@@ -163,7 +163,16 @@
     return d;
   }
   function saveWriting(d) { Store.set(WRITE_KEY, d); notifyChange(); }
-  function getPhrases() { return Store.get(PHRASE_KEY, []); }
+  function getPhrases() {
+    var list = Store.get(PHRASE_KEY, []);
+    var changed = false;
+    (list || []).forEach(function (p) {
+      if (p.photo != null && !Array.isArray(p.photos)) { p.photos = p.photo ? [p.photo] : []; delete p.photo; changed = true; }
+      if (p.photos == null) { p.photos = []; changed = true; }
+    });
+    if (changed) Store.set(PHRASE_KEY, list);
+    return list;
+  }
   function savePhrases(list) { Store.set(PHRASE_KEY, list); notifyChange(); }
   function getGoals() { return Object.assign({}, DEFAULT_GOALS, Store.get(SET_KEY, {})); }
   function saveGoals(g) { Store.set(SET_KEY, g); }
@@ -342,13 +351,14 @@
     var modeTxt = (r.activity === 'speaking' && r.mode && SPEAK_MODES[r.mode]) ? ' · ' + SPEAK_MODES[r.mode].label : '';
     var sub = [r.topic, r.notes].filter(Boolean).map(function (s) { return esc(s.length > 60 ? s.slice(0, 60) + '…' : s); }).join(' — ');
     var sideParts = [];
+    var mediaCount = Array.isArray(r.media) ? r.media.length : (r.media ? 1 : 0);
     if (r.duration) sideParts.push(esc(fmtMinutes(r.duration)));
     if (r.score > 0) sideParts.push(esc(String(r.score)) + '/100');
     row.innerHTML =
       '<div class="recent-icon" style="background:' + a.color + '18">' + a.icon + '</div>' +
       '<div class="recent-main"><div class="recent-title">' + esc(a.label + modeTxt) +
       (r.status === 'partial' ? ' <span class="st-chip st-in-progress">partial</span>' : '') +
-      '</div><div class="recent-sub">' + esc(fmtDate(r.date)) + (sub ? ' · ' + sub : '') + (r.media ? ' · 📎 ' + (r.mediaType === 'audio' ? 'audio' : 'photo') : '') + '</div></div>' +
+      '</div><div class="recent-sub">' + esc(fmtDate(r.date)) + (sub ? ' · ' + sub : '') + (mediaCount ? ' · 📎 ' + (r.mediaType === 'audio' ? 'audio' : 'photo') + (mediaCount > 1 ? ' ×' + mediaCount : '') : '') + '</div></div>' +
       '<div class="recent-side"><div class="v">' + sideParts.join(' · ') + '</div>' +
       '<div class="s">' + (r.status === 'done' || !r.status ? '✅' : '') + '</div></div>';
     if (opts) {
@@ -576,7 +586,7 @@
       '<div class="form-actions"><button class="btn primary" type="submit">💾 Save session</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
-    var speakMedia = mediaAttach(speakEditId ? (list.find(function (r) { return r.id === speakEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    var speakMedia = mediaAttach(speakEditId ? (list.find(function (r) { return r.id === speakEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio', multiple: true });
     form.appendChild(speakMedia.el);
 
     var log = el('div', 'card');
@@ -634,7 +644,7 @@
           duration: dur, topic: f.topic.value.trim(),
           notes: f.notes.value.trim(), status: f.status.value,
           score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
-          media: media, mediaType: media ? 'audio' : null,
+          media: media, mediaType: (media && media.length) ? 'audio' : null,
           createdAt: Date.now()
         };
         if (speakEditId) { updateRecord(speakEditId, rec); toast('Session updated'); }
@@ -754,7 +764,7 @@
       '<div class="form-actions"><button class="btn primary" type="submit">💾 Save session</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
-    var listenMedia = mediaAttach(listenEditId ? (list.find(function (r) { return r.id === listenEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    var listenMedia = mediaAttach(listenEditId ? (list.find(function (r) { return r.id === listenEditId; }) || {}).media : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio', multiple: true });
     form.appendChild(listenMedia.el);
 
     var log = el('div', 'card');
@@ -798,7 +808,7 @@
           duration: dur, topic: f.topic.value.trim(), notes: f.notes.value.trim(),
           status: f.status.value,
           score: f.score.value === '' ? 0 : Math.min(100, Math.max(0, parseInt(f.score.value, 10) || 0)),
-          media: media, mediaType: media ? 'audio' : null,
+          media: media, mediaType: (media && media.length) ? 'audio' : null,
           createdAt: Date.now()
         };
         if (listenEditId) { updateRecord(listenEditId, rec); toast('Session updated'); }
@@ -1432,8 +1442,8 @@
   window.LTEnglish = {
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,
     DEFAULT_GOALS: DEFAULT_GOALS,
-    REC_KEY: *** READ_KEY: *** WRITE_KEY: ***
-    PHRASE_KEY: *** SET_KEY: *** 
+    REC_KEY: REC_KEY, READ_KEY: READ_KEY, WRITE_KEY: WRITE_KEY,
+    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, 
     act: act,
     getRecords: getRecords, saveRecords: saveRecords,
     addRecord: addRecord, updateRecord: updateRecord, deleteRecord: deleteRecord,

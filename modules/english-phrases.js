@@ -46,7 +46,7 @@
       '<div class="form-actions"><button class="btn primary" type="submit">➕ Save phrase</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
-    var phPhoto = E.media.mediaAttach(phraseEditId ? (phrases.find(function (p) { return p.id === phraseEditId; }) || {}).photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
+    var phPhoto = E.media.mediaAttach(phraseEditId ? (phrases.find(function (p) { return p.id === phraseEditId; }) || {}).photos : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo', multiple: true });
     form.appendChild(phPhoto.el);
 
     /* list */
@@ -86,14 +86,14 @@
       var phrase = f.phrase.value.trim();
       var meaning = f.meaning.value.trim();
       if (!phrase || !meaning) { toast('Phrase and meaning are required'); return; }
-      var prevPhoto = phraseEditId ? (E.getPhrases().find(function (p) { return p.id === phraseEditId; }) || {}).photo : null;
-      phPhoto.resolve(prevPhoto).then(function (photo) {
+      var prevPhotos = phraseEditId ? (E.getPhrases().find(function (p) { return p.id === phraseEditId; }) || {}).photos : null;
+      phPhoto.resolve(prevPhotos).then(function (photos) {
       if (phraseEditId) {
         var list = E.getPhrases().map(function (p) {
           if (p.id !== phraseEditId) return p;
           p.phrase = phrase; p.meaning = meaning;
           p.example = f.example.value.trim(); p.notes = f.notes.value.trim();
-          p.photo = photo;
+          p.photos = photos;
           return p;
         });
         E.savePhrases(list);
@@ -106,7 +106,7 @@
         id: uid(), phrase: phrase, meaning: meaning,
         example: f.example.value.trim(), notes: f.notes.value.trim(),
         learned: todayISO(), lastReview: null, reviews: 0, status: 'learning',
-        photo: photo
+        photos: photos
       };
       E.savePhrases(E.getPhrases().concat([np]));
       E.addRecord({
@@ -123,9 +123,10 @@
 
   function phraseCard(p, isLearned) {
     var card = el('div', 'phrase-card');
+    var photos = (p.photos && p.photos.length) ? p.photos : [];
     card.innerHTML =
       '<div class="phrase-main">' +
-      '<div class="phrase-text">' + esc(p.phrase) + '</div>' + (p.photo ? '<img src="' + p.photo + '" alt="Phrase photo" style="max-width:200px;max-height:150px;border-radius:10px;border:1px solid var(--line);margin-top:6px;display:block">' : '') +
+      '<div class="phrase-text">' + esc(p.phrase) + '</div>' + photos.map(function (url) { return '<img src="' + url + '" alt="Phrase photo" style="max-width:200px;max-height:150px;border-radius:10px;border:1px solid var(--line);margin-top:6px;display:block">'; }).join('') +
       '<div class="phrase-meaning">' + esc(p.meaning) + '</div>' +
       (p.example ? '<div class="phrase-example">" ' + esc(p.example) + ' "</div>' : '') +
       (p.notes ? '<div class="phrase-example">📌 ' + esc(p.notes) + '</div>' : '') +
