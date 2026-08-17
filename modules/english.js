@@ -1258,8 +1258,7 @@
 
     var tiles = el('div', 'media-tiles');
     var row = el('div', 'media-row');
-    var addBtn = el('button', 'btn ghost small media-add', opts.kind === 'photo' ? '📷 Add photo' : '🎤 Add audio');
-    addBtn.type = 'button';
+    var addBtn = el('label', 'btn ghost small media-add', opts.kind === 'photo' ? '📷 Add photo' : '🎤 Add audio');
     var input = el('input', null);
     input.type = 'file';
     input.accept = opts.accept || '*/*';
@@ -1300,7 +1299,6 @@
     }
     render();
 
-    addBtn.addEventListener('click', function (e) { e.preventDefault(); input.click(); });
     input.addEventListener('change', function () {
       var fl = input.files[0];
       if (!fl) return;
@@ -1332,14 +1330,12 @@
     var state = { photo: opts.photo || null, audio: opts.audio || null };
     function fire() { opts.onChange({ photo: state.photo, audio: state.audio }); }
     function addBtn(label, kind, accept) {
-      var b = el('button', 'btn ghost small row-media-add', label);
-      b.type = 'button';
+      var b = el('label', 'btn ghost small row-media-add', label);
       var inp = el('input', null);
       inp.type = 'file';
       inp.accept = accept;
       inp.style.display = 'none';
       b.appendChild(inp);
-      b.addEventListener('click', function (e) { e.preventDefault(); inp.click(); });
       inp.addEventListener('change', function () {
         var fl = inp.files[0];
         if (!fl) return;
@@ -1368,7 +1364,7 @@
         bar.appendChild(im);
         bar.appendChild(xp);
       } else {
-        bar.appendChild(addBtn('📷', 'photo', 'image/*'));
+        bar.appendChild(addBtn('📷 Photo', 'photo', 'image/*'));
       }
       if (state.audio) {
         var au = el('audio', 'row-media-audio', null);
@@ -1380,7 +1376,7 @@
         bar.appendChild(au);
         bar.appendChild(xa);
       } else if (opts.allowAudio) {
-        bar.appendChild(addBtn('🎤', 'audio', 'audio/*'));
+        bar.appendChild(addBtn('🎤 Audio', 'audio', 'audio/*'));
       }
     }
     render();
