@@ -46,7 +46,7 @@
       '<div class="form-actions"><button class="btn primary" type="submit">➕ Save phrase</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
     wrap.appendChild(form);
-    var phPhoto = E.media.mediaAttach(phraseEditId ? (phrases.find(function (p) { return p.id === phraseEditId; }) || {}).photos : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo', multiple: true });
+    var phPhoto = E.media.mediaAttach(phraseEditId ? (((phrases.find(function (p) { return p.id === phraseEditId; }) || {}).photos || [])[0] || null) : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
     form.appendChild(phPhoto.el);
 
     /* list */
@@ -86,8 +86,9 @@
       var phrase = f.phrase.value.trim();
       var meaning = f.meaning.value.trim();
       if (!phrase || !meaning) { toast('Phrase and meaning are required'); return; }
-      var prevPhotos = phraseEditId ? (E.getPhrases().find(function (p) { return p.id === phraseEditId; }) || {}).photos : null;
-      phPhoto.resolve(prevPhotos).then(function (photos) {
+      var prevPhoto = phraseEditId ? (((E.getPhrases().find(function (p) { return p.id === phraseEditId; }) || {}).photos || [])[0] || null) : null;
+      phPhoto.resolve(prevPhoto).then(function (photo) {
+      var photos = photo ? [photo] : [];
       if (phraseEditId) {
         var list = E.getPhrases().map(function (p) {
           if (p.id !== phraseEditId) return p;
