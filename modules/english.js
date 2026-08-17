@@ -27,11 +27,11 @@
   var toast = H.toast, el = H.el;
 
   /* ---------------- Storage keys & config ---------------- */
-  var REC_KEY = '***';
-  var READ_KEY = '***';
-  var WRITE_KEY = '***';
-  var PHRASE_KEY = '***';
-  var SET_KEY = '***';
+  var REC_KEY = 'english.records';
+  var READ_KEY = 'english.reading';
+  var WRITE_KEY = 'english.writing';
+  var PHRASE_KEY = 'english.phrases';
+  var SET_KEY = 'english.settings';
 
   var ACTIVITIES = {
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
@@ -294,6 +294,37 @@
     return getPhrases().reduce(function (a, p) {
       return a + ((typeof p.count === 'number' && p.count > 0) ? p.count : 1);
     }, 0);
+  }
+  /* phrases learned bucketed by day/week/month (count-based, for charts) */
+  function phraseBuckets(mode) {
+    var today = todayISO();
+    var keys = [];
+    if (mode === 'day') {
+      for (var i = 13; i >= 0; i--) keys.push(addDays(today, -i));
+    } else if (mode === 'week') {
+      var thisMon = startOfWeek(today);
+      for (var j = 7; j >= 0; j--) keys.push(addDays(thisMon, -j * 7));
+    } else {
+      var now = new Date();
+      for (var m = 5; m >= 0; m--) {
+        var d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+        keys.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+      }
+    }
+    var counts = {};
+    getPhrases().forEach(function (p) {
+      var dd = p.date || p.learned;
+      if (!dd) return;
+      var k = mode === 'day' ? dd : mode === 'week' ? startOfWeek(dd) : dd.slice(0, 7);
+      var c = (typeof p.count === 'number' && p.count > 0) ? p.count : 1;
+      counts[k] = (counts[k] || 0) + c;
+    });
+    var labels = keys.map(function (b) {
+      if (mode === 'day') return parseISO(b).toLocaleDateString('en-US', { weekday: 'short' });
+      if (mode === 'week') return fmtDay(b);
+      return parseISO(b + '-01').toLocaleDateString('en-US', { month: 'short' });
+    });
+    return { labels: labels, buckets: keys.map(function (k) { return { key: k, count: counts[k] || 0 }; }) };
   }
 
   /* ---------------- Shared UI ---------------- */
@@ -1038,6 +1069,7 @@
 
     var bdata = bucketize(list, progressMode);
     var labels = bdata.labels;
+    var pdata = phraseBuckets(progressMode);
 
     var row1 = el('div', 'grid-2');
     var cTime = card('Practice time', 'Minutes per ' + progressMode);
@@ -1047,6 +1079,10 @@
     cScore.appendChild(el('canvas', 'chart'));
     row1.appendChild(cScore);
     wrap.appendChild(row1);
+
+    var cPhrases = card('Phrases learned', 'New phrases per ' + progressMode);
+    cPhrases.appendChild(el('canvas', 'chart'));
+    wrap.appendChild(cPhrases);
 
     var row2 = el('div', 'grid-2');
     var cActs = card('Time by skill', 'Where your minutes actually go');
@@ -1124,6 +1160,12 @@
         .sort(function (a, b) { return b.value - a.value; }),
       centerValue: fmtMinutes(stats.totalMinutes),
       centerLabel: 'total'
+    });
+    C.barChart(cPhrases.querySelector('canvas'), {
+      labels: pdata.labels,
+      values: pdata.buckets.map(function (x) { return x.count; }),
+      color: '#06b6d4',
+      format: function (v) { return String(Math.round(v)); }
     });
   }
   function matRow(title, type, done, total, id, href) {
@@ -1450,8 +1492,8 @@
   window.LTEnglish = {
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,
     DEFAULT_GOALS: DEFAULT_GOALS,
-    REC_KEY: *** READ_KEY: *** WRITE_KEY: ***
-    PHRASE_KEY: *** SET_KEY: *** 
+    REC_KEY: REC_KEY, READ_KEY: READ_KEY, WRITE_KEY: WRITE_KEY,
+    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, 
     act: act,
     getRecords: getRecords, saveRecords: saveRecords,
     addRecord: addRecord, updateRecord: updateRecord, deleteRecord: deleteRecord,
