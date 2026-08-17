@@ -37,7 +37,7 @@
       '</div>' +
       '<div class="form-actions"><button class="btn primary" type="submit">💾 Save entry</button>' +
       '<button class="btn ghost" type="button" id="btn-cancel" style="display:none">Cancel edit</button></div>';
-    var wPhoto = E.media.mediaAttach(editing ? editing.photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
+    var wPhoto = E.media.mediaAttach(editing ? editing.photos : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo', multiple: true });
     form.appendChild(wPhoto.el);
     wrap.appendChild(form);
 
@@ -56,12 +56,12 @@
       var title = f.title.value.trim();
       var pages = parseInt(f.pages.value, 10) || 1;
       if (!title) { toast('Title is required'); return; }
-      wPhoto.resolve(editing ? editing.photo : null).then(function (photo) {
+      wPhoto.resolve().then(function (photos) {
         var d = E.getWriting();
         var entry = {
           id: editId || uid(), title: title, pages: Math.max(1, pages),
           date: f.date.value || todayISO(), timeSpent: parseInt(f.timeSpent.value, 10) || 0,
-          photo: photo, createdAt: (editing && editing.createdAt) || Date.now()
+          photos: photos, createdAt: (editing && editing.createdAt) || Date.now()
         };
         if (editId) {
           d.entries = (d.entries || []).map(function (x) { return x.id === editId ? entry : x; });
@@ -113,11 +113,11 @@
           LT.render();
         });
         var bar = E.media.rowMediaBar({
-          photo: x.photo || null,
+          photos: x.photos || [],
           allowAudio: false,
           onChange: function (patch) {
             var d = E.getWriting();
-            d.entries = (d.entries || []).map(function (y) { return y.id === x.id ? Object.assign({}, y, { photo: patch.photo }) : y; });
+            d.entries = (d.entries || []).map(function (y) { return y.id === x.id ? Object.assign({}, y, { photos: patch.photos }) : y; });
             E.saveWriting(d);
             toast('Photo saved');
           }

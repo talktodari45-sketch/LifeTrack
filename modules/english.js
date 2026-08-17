@@ -106,19 +106,26 @@
     var d = Store.get(READ_KEY, { materials: [] });
     if (!d || typeof d !== 'object') d = { materials: [] };
     var changed = false;
+    function arr(x) { return x == null ? [] : (Array.isArray(x) ? x : [x]); }
     (d.materials || []).forEach(function (m) {
       (m.chapters || []).forEach(function (ch) {
         if (Array.isArray(ch.pages)) {
           var n = ch.pages.length;
           var first = ch.pages[0] || {};
           ch.pages = Math.max(1, n);
-          if (!ch.photo) ch.photo = first.photo || null;
-          if (!ch.audio) ch.audio = first.audio || null;
+          if (first.photo != null) ch.photos = [first.photo];
+          if (first.audio != null) ch.audios = [first.audio];
           changed = true;
         } else if (typeof ch.pages !== 'number') {
           ch.pages = 1;
           changed = true;
         }
+        if (ch.photo != null && !Array.isArray(ch.photos)) ch.photos = [ch.photo];
+        if (ch.audio != null && !Array.isArray(ch.audios)) ch.audios = [ch.audio];
+        if (ch.photos == null) ch.photos = [];
+        if (ch.audios == null) ch.audios = [];
+        if ('photo' in ch) { delete ch.photo; changed = true; }
+        if ('audio' in ch) { delete ch.audio; changed = true; }
       });
     });
     if (changed) Store.set(READ_KEY, d);
@@ -128,6 +135,7 @@
   function getWriting() {
     var d = Store.get(WRITE_KEY, { entries: [] });
     if (!d || typeof d !== 'object') d = { entries: [] };
+    var changed = false;
     if (d.materials && !d.entries) {
       var migrated = [];
       (d.materials || []).forEach(function (m) {
@@ -135,14 +143,23 @@
           migrated.push({
             id: p.id || uid(), title: m.title + (((m.pages || []).length > 1) ? ' \u2014 Page ' + (pi + 1) : ''),
             pages: 1, date: p.date || null, timeSpent: p.timeSpent || 0,
-            photo: p.photo || null, createdAt: p.createdAt || Date.now()
+            photos: p.photo ? [p.photo] : [], createdAt: p.createdAt || Date.now()
           });
         });
       });
       d = { entries: migrated };
-      Store.set(WRITE_KEY, d);
+      changed = true;
     }
     if (!d.entries) d.entries = [];
+    (d.entries || []).forEach(function (e) {
+      if (e.photo !== undefined) {
+        e.photos = Array.isArray(e.photos) ? e.photos : (e.photo ? [e.photo] : []);
+        delete e.photo;
+        changed = true;
+      }
+      if (!Array.isArray(e.photos)) { e.photos = []; changed = true; }
+    });
+    if (changed) Store.set(WRITE_KEY, d);
     return d;
   }
   function saveWriting(d) { Store.set(WRITE_KEY, d); notifyChange(); }
@@ -1252,9 +1269,12 @@
     });
   }
   function mediaAttach(current, opts) {
-    /* Compact media-tile UI: dashed add button + thumbnail/player tile with remove */
+    /* Media attach: single (default) or multiple (opts.multiple) */
+    var multi = !!opts.multiple;
     var wrap2 = el('div', 'media-attach');
-    var state = { value: current || null, removed: false };
+    var state = multi
+      ? { items: Array.isArray(current) ? current.slice() : (current ? [current] : []) }
+      : { value: current || null, removed: false };
 
     var tiles = el('div', 'media-tiles');
     var row = el('div', 'media-row');
@@ -1262,55 +1282,69 @@
     var input = el('input', null);
     input.type = 'file';
     input.accept = opts.accept || '*/*';
+    input.multiple = multi;
     input.style.display = 'none';
     addBtn.appendChild(input);
     row.appendChild(addBtn);
-    var hint = el('span', 'media-hint', opts.hint || (opts.kind === 'photo' ? 'Optional — attach a photo' : 'Optional — attach a recording'));
+    var hintText = opts.hint || (opts.kind === 'photo'
+      ? (multi ? 'Optional — attach one or more photos' : 'Optional — attach a photo')
+      : (multi ? 'Optional — attach one or more recordings' : 'Optional — attach a recording'));
+    var hint = el('span', 'media-hint', hintText);
     row.appendChild(hint);
 
-    function render() {
-      tiles.innerHTML = '';
-      if (!state.value) return;
+    function renderTile(url, idx, label) {
       var tile = el('div', 'media-tile');
       if (opts.kind === 'photo') {
         var im = el('img', null);
-        im.src = state.value;
+        im.src = url;
         im.alt = 'Attached photo';
         tile.appendChild(im);
         var meta = el('div', 'media-meta');
-        meta.appendChild(el('div', 'media-name', 'Photo'));
+        meta.appendChild(el('div', 'media-name', label));
         meta.appendChild(el('div', 'media-sub', 'Saved with this entry'));
         tile.appendChild(meta);
       } else {
         var au = el('audio', null);
         au.controls = true;
-        au.src = state.value;
+        au.src = url;
         tile.appendChild(au);
         var meta2 = el('div', 'media-meta');
-        meta2.appendChild(el('div', 'media-name', 'Audio recording'));
+        meta2.appendChild(el('div', 'media-name', label));
         meta2.appendChild(el('div', 'media-sub', 'Saved with this entry'));
         tile.appendChild(meta2);
       }
-      var rm = el('button', 'btn danger small', '✕ Remove');
+      var rm = el('button', 'btn danger small', '✕');
       rm.type = 'button';
-      rm.addEventListener('click', function () { state.value = null; state.removed = true; render(); });
+      rm.title = 'Remove';
+      rm.addEventListener('click', function () {
+        if (multi) { state.items.splice(idx, 1); } else { state.value = null; state.removed = true; }
+        render();
+      });
       tile.appendChild(rm);
-      tiles.appendChild(tile);
+      return tile;
+    }
+
+    function render() {
+      tiles.innerHTML = '';
+      if (multi) {
+        state.items.forEach(function (url, i) {
+          tiles.appendChild(renderTile(url, i, (opts.kind === 'photo' ? 'Photo ' : 'Audio ') + (i + 1)));
+        });
+      } else if (state.value) {
+        tiles.appendChild(renderTile(state.value, 0, opts.kind === 'photo' ? 'Photo' : 'Audio recording'));
+      }
     }
     render();
 
     input.addEventListener('change', function () {
-      var fl = input.files[0];
-      if (!fl) return;
-      var work = opts.kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, (opts.maxBytes || 2) * 1024 * 1024);
-      work.then(function (dataUrl) {
-        state.value = dataUrl;
-        state.removed = false;
-        render();
-      }).catch(function (err) {
-        toast(err.message || 'Could not read file');
-        input.value = '';
-      });
+      var files = Array.prototype.slice.call(input.files || []);
+      if (!files.length) return;
+      var job = function (fl) { return opts.kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, (opts.maxBytes || 2) * 1024 * 1024); };
+      var done = multi
+        ? Promise.all(files.map(job)).then(function (urls) { state.items = state.items.concat(urls); })
+        : job(files[0]).then(function (url) { state.value = url; state.removed = false; });
+      done.then(function () { input.value = ''; render(); })
+        .catch(function (err) { toast(err.message || 'Could not read file'); input.value = ''; });
     });
 
     wrap2.appendChild(tiles);
@@ -1318,6 +1352,7 @@
     return {
       el: wrap2,
       resolve: function (previous) {
+        if (multi) return Promise.resolve(state.items.slice());
         if (state.removed) return Promise.resolve(null);
         if (state.value) return Promise.resolve(state.value);
         return Promise.resolve(previous || null);
@@ -1327,62 +1362,58 @@
   /* Compact per-row media bar (list views): photo/audio attach with inline preview */
   function rowMediaBar(opts) {
     var bar = el('div', 'row-media-bar');
-    var state = { photo: opts.photo || null, audio: opts.audio || null };
-    function fire() { opts.onChange({ photo: state.photo, audio: state.audio }); }
+    var state = {
+      photos: Array.isArray(opts.photos) ? opts.photos.slice() : (opts.photos ? [opts.photos] : []),
+      audios: Array.isArray(opts.audios) ? opts.audios.slice() : (opts.audios ? [opts.audios] : [])
+    };
+    function fire() { opts.onChange({ photos: state.photos.slice(), audios: state.audios.slice() }); }
     function addBtn(label, kind, accept) {
       var b = el('label', 'btn ghost small row-media-add', label);
       var inp = el('input', null);
       inp.type = 'file';
       inp.accept = accept;
+      inp.multiple = true;
       inp.style.display = 'none';
       b.appendChild(inp);
       inp.addEventListener('change', function () {
-        var fl = inp.files[0];
-        if (!fl) return;
-        var work = kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, 2 * 1024 * 1024);
-        work.then(function (d) {
-          if (kind === 'photo') state.photo = d; else state.audio = d;
+        var files = Array.prototype.slice.call(inp.files || []);
+        if (!files.length) return;
+        var jobs = files.map(function (fl) { return kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, 2 * 1024 * 1024); });
+        Promise.all(jobs).then(function (urls) {
+          if (kind === 'photo') state.photos = state.photos.concat(urls); else state.audios = state.audios.concat(urls);
           inp.value = '';
           render();
           fire();
-        }).catch(function (err) {
-          toast(err.message || 'Could not read file');
-          inp.value = '';
-        });
+        }).catch(function (err) { toast(err.message || 'Could not read file'); inp.value = ''; });
       });
       return b;
     }
     function render() {
       bar.innerHTML = '';
-      if (state.photo) {
+      state.photos.forEach(function (url, i) {
         var im = el('img', 'row-media-thumb', null);
-        im.src = state.photo;
-        im.alt = 'Photo';
+        im.src = url; im.alt = 'Photo';
         var xp = el('button', 'btn danger small', '✕');
-        xp.type = 'button';
-        xp.addEventListener('click', function () { state.photo = null; render(); fire(); });
-        bar.appendChild(im);
-        bar.appendChild(xp);
-      } else {
-        bar.appendChild(addBtn('📷 Photo', 'photo', 'image/*'));
-      }
-      if (state.audio) {
-        var au = el('audio', 'row-media-audio', null);
-        au.controls = true;
-        au.src = state.audio;
-        var xa = el('button', 'btn danger small', '✕');
-        xa.type = 'button';
-        xa.addEventListener('click', function () { state.audio = null; render(); fire(); });
-        bar.appendChild(au);
-        bar.appendChild(xa);
-      } else if (opts.allowAudio) {
+        xp.type = 'button'; xp.title = 'Remove';
+        xp.addEventListener('click', function () { state.photos.splice(i, 1); render(); fire(); });
+        bar.appendChild(im); bar.appendChild(xp);
+      });
+      bar.appendChild(addBtn('📷 Photo', 'photo', 'image/*'));
+      if (opts.allowAudio) {
+        state.audios.forEach(function (url, i) {
+          var au = el('audio', 'row-media-audio', null);
+          au.controls = true; au.src = url;
+          var xa = el('button', 'btn danger small', '✕');
+          xa.type = 'button'; xa.title = 'Remove';
+          xa.addEventListener('click', function () { state.audios.splice(i, 1); render(); fire(); });
+          bar.appendChild(au); bar.appendChild(xa);
+        });
         bar.appendChild(addBtn('🎤 Audio', 'audio', 'audio/*'));
       }
     }
     render();
     return bar;
   }
-
   /* ---------------- Public data layer (for other module files + AI features) ---------------- */
   window.LTEnglish = {
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,

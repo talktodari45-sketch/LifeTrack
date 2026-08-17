@@ -96,16 +96,16 @@
       var body = el('div', 'chapter-body');
       var row = el('div', 'page-row');
       var main = el('div', 'p-main');
-      main.appendChild(el('div', 'p-meta', pageCount(ch) + ' pages' + (ch.photo ? ' · 🖼' : '') + (ch.audio ? ' · 🎤' : '')));
+      main.appendChild(el('div', 'p-meta', pageCount(ch) + ' pages' + ((ch.photos && ch.photos.length) ? ' · 🖼' : '') + ((ch.audios && ch.audios.length) ? ' · 🎤' : '')));
       var bar = E.media.rowMediaBar({
-        photo: ch.photo || null,
-        audio: ch.audio || null,
+        photos: ch.photos || [],
+        audios: ch.audios || [],
         allowAudio: true,
         onChange: function (patch) {
           var d = E.getReading();
           d.materials.forEach(function (x) {
             if (x.id !== m.id) return;
-            (x.chapters || []).forEach(function (c) { if (c.id === ch.id) { c.photo = patch.photo; c.audio = patch.audio; } });
+            (x.chapters || []).forEach(function (c) { if (c.id === ch.id) { c.photos = patch.photos; c.audios = patch.audios; } });
           });
           E.saveReading(d);
           toast('Attachment saved');
@@ -150,8 +150,8 @@
       '<button class="btn primary" type="submit">' + (editingMat ? '💾 Save chapter' : '➕ Add chapter') + '</button>' +
       (editingMat ? '<button class="btn ghost" type="button" id="btn-cancel">Cancel</button>' : '') +
       '</div>';
-    var chPhoto = E.media.mediaAttach(editing ? editing.photo : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo' });
-    var chAudio = E.media.mediaAttach(editing ? editing.audio : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio' });
+    var chPhoto = E.media.mediaAttach(editing ? editing.photos : null, { accept: 'image/*', label: 'Photo (optional)', kind: 'photo', multiple: true });
+    var chAudio = E.media.mediaAttach(editing ? editing.audios : null, { accept: 'audio/*', label: 'Audio recording (optional)', kind: 'audio', multiple: true });
     chForm.appendChild(chPhoto.el);
     chForm.appendChild(chAudio.el);
     card.appendChild(chForm);
@@ -165,12 +165,12 @@
       e.preventDefault();
       var title = cf.title.value.trim() || 'Chapter ' + (chs.length + 1);
       var n = Math.max(1, parseInt(cf.pages.value, 10) || 1);
-      Promise.all([chPhoto.resolve(editing ? editing.photo : null), chAudio.resolve(editing ? editing.audio : null)]).then(function (res) {
+      Promise.all([chPhoto.resolve(), chAudio.resolve()]).then(function (res) {
         var d = E.getReading();
         var target = null;
         d.materials.forEach(function (x) { if (x.id === m.id) target = x; });
         if (!target) { toast('Material not found'); return; }
-        var ch = { id: editing ? editing.id : uid(), title: title, pages: n, photo: res[0], audio: res[1] };
+        var ch = { id: editing ? editing.id : uid(), title: title, pages: n, photos: res[0], audios: res[1] };
         if (editing) {
           target.chapters = (target.chapters || []).map(function (c) { return c.id === ch.id ? ch : c; });
           toast('Chapter updated');
