@@ -27,11 +27,11 @@
   var toast = H.toast, el = H.el;
 
   /* ---------------- Storage keys & config ---------------- */
-  var REC_KEY = 'english.records';
-  var READ_KEY = 'english.reading';
-  var WRITE_KEY = 'english.writing';
-  var PHRASE_KEY = 'english.phrases';
-  var SET_KEY = 'english.settings';
+  var REC_KEY = '***';
+  var READ_KEY = '***';
+  var WRITE_KEY = '***';
+  var PHRASE_KEY = '***';
+  var SET_KEY = '***';
 
   var ACTIVITIES = {
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
@@ -284,9 +284,16 @@
   function phrasesByDay() {
     var m = {};
     getPhrases().forEach(function (p) {
-      if (p.learned) m[p.learned] = (m[p.learned] || 0) + 1;
+      var d = p.date || p.learned;
+      var c = (typeof p.count === 'number' && p.count > 0) ? p.count : 1;
+      if (d) m[d] = (m[d] || 0) + c;
     });
     return m;
+  }
+  function phrasesTotal() {
+    return getPhrases().reduce(function (a, p) {
+      return a + ((typeof p.count === 'number' && p.count > 0) ? p.count : 1);
+    }, 0);
   }
 
   /* ---------------- Shared UI ---------------- */
@@ -428,7 +435,7 @@
     var cards = [
       { icon: '🔥', label: 'Daily streak', value: streak + ' day' + (streak === 1 ? '' : 's'), sub: streak > 0 ? 'consecutive days' : 'start today', color: '#f59e0b' },
       { icon: '⏱️', label: 'Total practice', value: fmtMinutes(stats.totalMinutes), sub: stats.activeDays + ' active days', color: '#6366f1' },
-      { icon: '💬', label: 'Phrases learned', value: String(getPhrases().length), sub: 'saved phrases', color: '#06b6d4' },
+      { icon: '💬', label: 'Phrases learned', value: String(phrasesTotal()), sub: 'all time', color: '#06b6d4' },
       { icon: '📖', label: 'Pages read', value: rTot.done, sub: rTot.chapters + ' chapters', color: '#f59e0b' },
       { icon: '✍️', label: 'Pages written', value: wTot.done, sub: wTot.total + ' total pages', color: '#ec4899' },
       { icon: '⭐', label: 'Avg score', value: stats.avgScore != null ? stats.avgScore + '/100' : '—', sub: 'self-rated sessions', color: '#10b981' }
@@ -1014,7 +1021,7 @@
       '<span class="chip">⏱️ Total time <b>' + esc(fmtMinutes(stats.totalMinutes)) + '</b></span>' +
       '<span class="chip">🗓️ Active days <b>' + stats.activeDays + '</b></span>' +
       '<span class="chip">⭐ Avg score <b>' + (stats.avgScore != null ? stats.avgScore + '/100' : '—') + '</b></span>' +
-      '<span class="chip">💬 Phrases <b>' + getPhrases().length + '</b></span>' +
+      '<span class="chip">💬 Phrases <b>' + phrasesTotal() + '</b></span>' +
       '<span class="chip">📖 Pages read <b>' + rTot.done + '</b></span>' +
       '<span class="chip">✍️ Pages written <b>' + wTot.done + '</b></span>';
     wrap.appendChild(chips);
@@ -1443,8 +1450,8 @@
   window.LTEnglish = {
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,
     DEFAULT_GOALS: DEFAULT_GOALS,
-    REC_KEY: REC_KEY, READ_KEY: READ_KEY, WRITE_KEY: WRITE_KEY,
-    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, 
+    REC_KEY: *** READ_KEY: *** WRITE_KEY: ***
+    PHRASE_KEY: *** SET_KEY: *** 
     act: act,
     getRecords: getRecords, saveRecords: saveRecords,
     addRecord: addRecord, updateRecord: updateRecord, deleteRecord: deleteRecord,
@@ -1456,7 +1463,7 @@
     wordCount: wordCount, pageLabel: pageLabel,
     readingTotals: readingTotals, writingTotals: writingTotals,
     computeStats: computeStats, computeStreak: computeStreak,
-    bucketize: bucketize, dayMap: dayMap, phrasesByDay: phrasesByDay,
+    bucketize: bucketize, dayMap: dayMap, phrasesByDay: phrasesByDay, phrasesTotal: phrasesTotal,
     ui: { card: card, emptyState: emptyState, statusChip: statusChip, scoreChip: scoreChip, goalRow: goalRow, recordRow: recordRow, buildHeatmap: buildHeatmap, legendHTML: legendHTML },
     media: { fileToDataUrl: fileToDataUrl, compressImage: compressImage, mediaAttach: mediaAttach, rowMediaBar: rowMediaBar }
   };
