@@ -183,6 +183,7 @@
           date: todayISO(), activity: 'readAloud',
           duration: 0, topic: m.title + ' — ' + ch.title,
           notes: n + (n === 1 ? ' page' : ' pages'),
+          pages: n,
           status: 'done', score: null, createdAt: Date.now()
         });
         editChKey = null;

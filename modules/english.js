@@ -37,7 +37,7 @@
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
     think:     { label: 'Think in English', icon: '💭', color: '#8b5cf6', goal: 1,  unit: 'session' },
     listen:    { label: 'Listen & Imitate', icon: '🎧', color: '#6366f1', goal: 15, unit: 'min' },
-    readAloud: { label: 'Read Aloud',       icon: '📖', color: '#f59e0b', goal: 10, unit: 'min' },
+    readAloud: { label: 'Read Aloud',       icon: '📖', color: '#f59e0b', goal: 2,  unit: 'pages' },
     writing:   { label: 'Writing',          icon: '✍️', color: '#ec4899', goal: 1,  unit: 'session' },
     phrases:   { label: 'Common Phrases',   icon: '💬', color: '#06b6d4', goal: 5,  unit: 'phrases' }
   };
@@ -47,7 +47,7 @@
     person: { label: 'With another person', icon: '👥' },
     ai:     { label: 'With AI',             icon: '🤖' }
   };
-  var DEFAULT_GOALS = { speaking: 15, think: 1, listen: 15, readAloud: 10, writing: 1, phrases: 5 };
+  var DEFAULT_GOALS = { speaking: 15, think: 1, listen: 15, readAloud: 2, writing: 1, phrases: 5 };
 
   function act(id) { return ACTIVITIES[id] || ACTIVITIES.speaking; }
 
@@ -451,11 +451,12 @@
       return todayRecs.filter(function (r) { return r.activity === actId; }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
     };
     var todayCount = function (actId) { return todayRecs.filter(function (r) { return r.activity === actId; }).length; };
+    var todayPages = function (actId) { return todayRecs.filter(function (r) { return r.activity === actId; }).reduce(function (a, r) { return a + (r.pages || 0); }, 0); };
     var rows = [
       goalRow('🎤', ACTIVITIES.speaking.color, 'Speaking', todayMinutes('speaking'), goals.speaking, 'min'),
       goalRow('💭', ACTIVITIES.think.color, 'Think in English', todayCount('think'), goals.think, 'session'),
       goalRow('🎧', ACTIVITIES.listen.color, 'Listen & Imitate', todayMinutes('listen'), goals.listen, 'min'),
-      goalRow('📖', ACTIVITIES.readAloud.color, 'Read Aloud', todayMinutes('readAloud'), goals.readAloud, 'min'),
+      goalRow('📖', ACTIVITIES.readAloud.color, 'Read Aloud', todayPages('readAloud'), goals.readAloud, 'pages'),
       goalRow('✍️', ACTIVITIES.writing.color, 'Writing', todayCount('writing'), goals.writing, 'session'),
       goalRow('💬', ACTIVITIES.phrases.color, 'Common Phrases', pbd[today] || 0, goals.phrases, 'learned')
     ];
@@ -1148,7 +1149,7 @@
     ACTIVITY_IDS.forEach(function (a) {
       var lab = act(a).label;
       var f = el('div', 'set-field');
-      f.innerHTML = '<label>' + esc(lab) + '<input type="number" min="0" max="600" data-goal="' + a + '"></label>';
+      f.innerHTML = '<label>' + esc(lab) + ' (' + act(a).unit + ')<input type="number" min="0" max="600" data-goal="' + a + '"></label>';
       f.querySelector('input').value = goals[a];
       setGrid.appendChild(f);
     });
