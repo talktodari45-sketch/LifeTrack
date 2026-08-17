@@ -27,11 +27,11 @@
   var toast = H.toast, el = H.el;
 
   /* ---------------- Storage keys & config ---------------- */
-  var REC_KEY = 'english.records';
-  var READ_KEY = 'english.reading';
-  var WRITE_KEY = 'english.writing';
-  var PHRASE_KEY = 'english.phrases';
-  var SET_KEY = 'english.settings';
+  var REC_KEY = '***';
+  var READ_KEY = '***';
+  var WRITE_KEY = '***';
+  var PHRASE_KEY = '***';
+  var SET_KEY = '***';
 
   var ACTIVITIES = {
     speaking:  { label: 'Speaking',         icon: '🎤', color: '#10b981', goal: 15, unit: 'min' },
@@ -1278,7 +1278,7 @@
 
     var tiles = el('div', 'media-tiles');
     var row = el('div', 'media-row');
-    var addBtn = el('label', 'btn ghost small media-add', opts.kind === 'photo' ? '📷 Add photo' : '🎤 Add audio');
+    var addBtn = el('label', 'btn ghost small media-add', opts.kind === 'photo' ? (multi ? '📷 Add photos' : '📷 Add photo') : (multi ? '🎤 Add recordings' : '🎤 Add audio'));
     var input = el('input', null);
     input.type = 'file';
     input.accept = opts.accept || '*/*';
@@ -1340,11 +1340,20 @@
       var files = Array.prototype.slice.call(input.files || []);
       if (!files.length) return;
       var job = function (fl) { return opts.kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, (opts.maxBytes || 2) * 1024 * 1024); };
-      var done = multi
-        ? Promise.all(files.map(job)).then(function (urls) { state.items = state.items.concat(urls); })
-        : job(files[0]).then(function (url) { state.value = url; state.removed = false; });
-      done.then(function () { input.value = ''; render(); })
-        .catch(function (err) { toast(err.message || 'Could not read file'); input.value = ''; });
+      if (multi) {
+        Promise.all(files.map(function (fl) { return job(fl).catch(function () { return null; }); }))
+          .then(function (urls) {
+            var ok = urls.filter(Boolean);
+            state.items = state.items.concat(ok);
+            input.value = '';
+            render();
+            if (ok.length < files.length) toast('Some files were skipped (could not be read)');
+          });
+      } else {
+        job(files[0]).then(function (url) { state.value = url; state.removed = false; })
+          .catch(function (err) { toast(err.message || 'Could not read file'); })
+          .then(function () { input.value = ''; render(); });
+      }
     });
 
     wrap2.appendChild(tiles);
@@ -1378,13 +1387,18 @@
       inp.addEventListener('change', function () {
         var files = Array.prototype.slice.call(inp.files || []);
         if (!files.length) return;
-        var jobs = files.map(function (fl) { return kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, 2 * 1024 * 1024); });
+        var jobs = files.map(function (fl) {
+          var p = kind === 'photo' ? compressImage(fl, 1280, 0.72) : fileToDataUrl(fl, 2 * 1024 * 1024);
+          return p.catch(function () { return null; });
+        });
         Promise.all(jobs).then(function (urls) {
-          if (kind === 'photo') state.photos = state.photos.concat(urls); else state.audios = state.audios.concat(urls);
+          var ok = urls.filter(Boolean);
+          if (kind === 'photo') state.photos = state.photos.concat(ok); else state.audios = state.audios.concat(ok);
           inp.value = '';
           render();
           fire();
-        }).catch(function (err) { toast(err.message || 'Could not read file'); inp.value = ''; });
+          if (ok.length < files.length) toast('Some files were skipped (could not be read)');
+        });
       });
       return b;
     }
@@ -1398,7 +1412,7 @@
         xp.addEventListener('click', function () { state.photos.splice(i, 1); render(); fire(); });
         bar.appendChild(im); bar.appendChild(xp);
       });
-      bar.appendChild(addBtn('📷 Photo', 'photo', 'image/*'));
+      bar.appendChild(addBtn('📷 Add photos', 'photo', 'image/*'));
       if (opts.allowAudio) {
         state.audios.forEach(function (url, i) {
           var au = el('audio', 'row-media-audio', null);
@@ -1408,7 +1422,7 @@
           xa.addEventListener('click', function () { state.audios.splice(i, 1); render(); fire(); });
           bar.appendChild(au); bar.appendChild(xa);
         });
-        bar.appendChild(addBtn('🎤 Audio', 'audio', 'audio/*'));
+        bar.appendChild(addBtn('🎤 Add audio', 'audio', 'audio/*'));
       }
     }
     render();
@@ -1418,8 +1432,8 @@
   window.LTEnglish = {
     ACTIVITIES: ACTIVITIES, ACTIVITY_IDS: ACTIVITY_IDS, SPEAK_MODES: SPEAK_MODES,
     DEFAULT_GOALS: DEFAULT_GOALS,
-    REC_KEY: REC_KEY, READ_KEY: READ_KEY, WRITE_KEY: WRITE_KEY,
-    PHRASE_KEY: PHRASE_KEY, SET_KEY: SET_KEY, 
+    REC_KEY: *** READ_KEY: *** WRITE_KEY: ***
+    PHRASE_KEY: *** SET_KEY: *** 
     act: act,
     getRecords: getRecords, saveRecords: saveRecords,
     addRecord: addRecord, updateRecord: updateRecord, deleteRecord: deleteRecord,
