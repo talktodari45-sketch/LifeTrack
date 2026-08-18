@@ -8,6 +8,7 @@
   var LT = window.LifeTrack;
   var E = window.LTEnglish;
   var H = LT.helpers;
+  var C = LT.charts;
   var esc = H.esc, uid = H.uid, todayISO = H.todayISO;
   var el = H.el, toast = H.toast;
 
@@ -25,6 +26,21 @@
     var head = el('div', 'page-head');
     head.innerHTML = '<h1>Read Aloud 📖</h1><p>Books, stories, chapters, pages and recordings — all on one page, no opening anything.</p>';
     wrap.appendChild(head);
+
+    /* read aloud dashboard KPIs + progress chart */
+    var rTot = E.readingTotals(reading);
+    var readRecs = E.getRecords().filter(function (r) { return r.activity === 'readAloud'; });
+    var readWeek = readRecs.filter(function (r) { return r.date >= H.addDays(todayISO(), -6); }).reduce(function (a, r) { return a + (r.pages || 0); }, 0);
+    wrap.appendChild(E.ui.statGrid([
+      { icon: '📚', label: 'Materials', value: String((reading.materials || []).length), sub: 'books, stories & articles', color: '#f59e0b' },
+      { icon: '📖', label: 'Chapters', value: String(rTot.chapters), sub: 'across all materials', color: '#f59e0b' },
+      { icon: '📄', label: 'Total pages', value: String(rTot.total), sub: 'all chapters', color: '#f59e0b' },
+      { icon: '📅', label: 'Pages this week', value: String(readWeek), sub: 'last 7 days', color: '#6366f1' }
+    ]));
+    var readChart = E.ui.card('Reading progress', 'Pages read per day — last 14 days');
+    var readCanvas = el('canvas', 'chart');
+    readChart.appendChild(readCanvas);
+    wrap.appendChild(readChart);
 
     /* new material */
     var form = el('form', 'card form-card');
@@ -57,6 +73,9 @@
     });
     wrap.appendChild(list);
     view.appendChild(wrap);
+
+    var readSeries = E.seriesBuckets(readRecs, 'day', function (r) { return r.pages || 0; });
+    C.barChart(readCanvas, { labels: readSeries.labels, values: readSeries.values, color: '#f59e0b', format: function (v) { return String(Math.round(v)); } });
   }
 
   function renderMaterialCard(m) {
@@ -76,9 +95,12 @@
     var delMat = el('button', 'btn danger small', 'Delete');
     delMat.addEventListener('click', function () {
       if (!window.confirm('Delete "' + m.title + '" and all its chapters?')) return;
+      var chIds = (m.chapters || []).map(function (c) { return c.id; });
       var d = E.getReading();
       d.materials = d.materials.filter(function (x) { return x.id !== m.id; });
       E.saveReading(d);
+      E.getRecords().filter(function (r) { return r.ref && r.ref.type === 'reading-chapter' && chIds.indexOf(r.ref.id) !== -1; })
+        .forEach(function (r) { E.deleteRecord(r.id); });
       if (editChKey && editChKey.indexOf(m.id + '::') === 0) editChKey = null;
       toast('Material deleted');
       LT.render();
@@ -125,6 +147,8 @@
           x.chapters = (x.chapters || []).filter(function (c) { return c.id !== ch.id; });
         });
         E.saveReading(d);
+        E.getRecords().filter(function (r) { return r.ref && r.ref.type === 'reading-chapter' && r.ref.id === ch.id; })
+          .forEach(function (r) { E.deleteRecord(r.id); });
         if (editChKey === m.id + '::' + ch.id) editChKey = null;
         toast('Chapter deleted');
         LT.render();

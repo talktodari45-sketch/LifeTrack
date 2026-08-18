@@ -9,6 +9,7 @@
   var LT = window.LifeTrack;
   var E = window.LTEnglish;
   var H = LT.helpers;
+  var C = LT.charts;
   var esc = H.esc, uid = H.uid, todayISO = H.todayISO;
   var fmtDate = H.fmtDate, fmtMinutes = H.fmtMinutes;
   var el = H.el, toast = H.toast;
@@ -24,6 +25,20 @@
     var head = el('div', 'page-head');
     head.innerHTML = '<h1>Writing ✍️</h1><p>Log every writing session: title, pages, date, time — plus a photo if you like.</p>';
     wrap.appendChild(head);
+
+    /* writing dashboard KPIs + volume chart */
+    var wTot = E.writingTotals(writing);
+    var writeWeek = entries.filter(function (x) { return (x.date || '') >= H.addDays(todayISO(), -6); }).reduce(function (a, x) { return a + (x.pages || 1); }, 0);
+    wrap.appendChild(E.ui.statGrid([
+      { icon: '📝', label: 'Entries', value: String(entries.length), sub: 'writing sessions', color: '#ec4899' },
+      { icon: '📄', label: 'Total pages', value: String(wTot.total), sub: 'all entries', color: '#ec4899' },
+      { icon: '⏱️', label: 'Total time', value: fmtMinutes(wTot.minutes), sub: 'time spent writing', color: '#6366f1' },
+      { icon: '📅', label: 'Pages this week', value: String(writeWeek), sub: 'last 7 days', color: '#10b981' }
+    ]));
+    var writeChart = E.ui.card('Writing volume', 'Pages written per day — last 14 days');
+    var writeCanvas = el('canvas', 'chart');
+    writeChart.appendChild(writeCanvas);
+    wrap.appendChild(writeChart);
 
     /* add / edit form */
     var form = el('form', 'card form-card');
@@ -129,6 +144,9 @@
     log.appendChild(listEl);
     wrap.appendChild(log);
     view.appendChild(wrap);
+
+    var writeSeries = E.seriesBuckets(entries, 'day', function (x) { return x.pages || 1; });
+    C.barChart(writeCanvas, { labels: writeSeries.labels, values: writeSeries.values, color: '#ec4899', format: function (v) { return String(Math.round(v)); } });
   }
 
   LT.extendModule('english', {

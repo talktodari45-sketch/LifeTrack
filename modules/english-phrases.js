@@ -9,6 +9,7 @@
   var LT = window.LifeTrack;
   var E = window.LTEnglish;
   var H = LT.helpers;
+  var C = LT.charts;
   var esc = H.esc, uid = H.uid, todayISO = H.todayISO;
   var fmtDate = H.fmtDate;
   var el = H.el, toast = H.toast;
@@ -38,6 +39,20 @@
     var head = el('div', 'page-head');
     head.innerHTML = '<h1>Common Phrases 💬</h1><p>Learn a few new phrases every day — log how many and snap a photo of them.</p>';
     wrap.appendChild(head);
+
+    /* phrases dashboard KPIs + trend chart */
+    var weekKeys = Object.keys(byDay).filter(function (d) { return d >= H.addDays(today, -6); });
+    var weekCount = weekKeys.reduce(function (a, d) { return a + byDay[d]; }, 0);
+    wrap.appendChild(E.ui.statGrid([
+      { icon: '💬', label: 'Total phrases', value: String(total), sub: 'all time', color: '#06b6d4' },
+      { icon: '📅', label: 'This week', value: String(weekCount), sub: 'last 7 days', color: '#6366f1' },
+      { icon: '🗓️', label: 'Days learned', value: String(Object.keys(byDay).length), sub: 'active days', color: '#10b981' },
+      { icon: '🎯', label: 'Today', value: String(todayCount), sub: 'of ' + goals.phrases + ' goal', color: '#f59e0b' }
+    ]));
+    var phChart = E.ui.card('Phrases learned', 'New phrases per day — last 14 days');
+    var phCanvas = el('canvas', 'chart');
+    phChart.appendChild(phCanvas);
+    wrap.appendChild(phChart);
 
     /* today goal */
     var goalCard = el('div', 'card');
@@ -80,6 +95,9 @@
     wrap.appendChild(histCard);
 
     view.appendChild(wrap);
+
+    var phSeries = E.seriesBuckets(list, 'day', function (p) { return (typeof p.count === 'number' && p.count > 0) ? p.count : 1; });
+    C.barChart(phCanvas, { labels: phSeries.labels, values: phSeries.values, color: '#06b6d4', format: function (v) { return String(Math.round(v)); } });
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();

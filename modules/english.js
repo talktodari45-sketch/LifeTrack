@@ -326,6 +326,42 @@
     });
     return { labels: labels, buckets: keys.map(function (k) { return { key: k, count: counts[k] || 0 }; }) };
   }
+  /* generic time-series bucketing of an arbitrary numeric value (pages, counts, minutes) */
+  function seriesBuckets(rows, mode, pick) {
+    var today = todayISO();
+    var keys = [];
+    if (mode === 'day') {
+      for (var i = 13; i >= 0; i--) keys.push(addDays(today, -i));
+    } else if (mode === 'week') {
+      var thisMon = startOfWeek(today);
+      for (var j = 7; j >= 0; j--) keys.push(addDays(thisMon, -j * 7));
+    } else {
+      var now = new Date();
+      for (var m = 5; m >= 0; m--) {
+        var d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+        keys.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+      }
+    }
+    function keyOf(date) {
+      return mode === 'day' ? date : mode === 'week' ? startOfWeek(date) : date.slice(0, 7);
+    }
+    var values = keys.map(function () { return 0; });
+    var idx = {};
+    keys.forEach(function (k, i) { idx[k] = i; });
+    (rows || []).forEach(function (r) {
+      var d = r.date || r.learned;
+      if (!d) return;
+      var i = idx[keyOf(d)];
+      if (i == null) return;
+      values[i] += pick(r) || 0;
+    });
+    var labels = keys.map(function (b) {
+      if (mode === 'day') return parseISO(b).toLocaleDateString('en-US', { weekday: 'short' });
+      if (mode === 'week') return fmtDay(b);
+      return parseISO(b + '-01').toLocaleDateString('en-US', { month: 'short' });
+    });
+    return { labels: labels, values: values };
+  }
 
   /* ---------------- Shared UI ---------------- */
   function card(title, sub) {
@@ -333,6 +369,17 @@
     c.appendChild(el('h2', null, esc(title)));
     if (sub) c.appendChild(el('div', 'card-sub', esc(sub)));
     return c;
+  }
+  function statGrid(cards) {
+    var grid = el('div', 'stat-grid');
+    cards.forEach(function (c) {
+      var cardEl = el('div', 'stat-card');
+      cardEl.innerHTML = '<div class="stat-icon" style="background:' + c.color + '1a;color:' + c.color + '">' + c.icon + '</div>' +
+        '<div class="stat-body"><div class="stat-value">' + esc(c.value) + '</div>' +
+        '<div class="stat-label">' + esc(c.label) + '</div><div class="stat-sub">' + esc(c.sub) + '</div></div>';
+      grid.appendChild(cardEl);
+    });
+    return grid;
   }
   function emptyState(container, title, sub, actions) {
     var e = el('div', 'empty-state');
@@ -602,6 +649,22 @@
     head.innerHTML = '<h1>Speaking 🎤</h1><p>Choose a simple topic and talk about it for 10–15 minutes. Solo, with a person, or with AI — all of it counts.</p>';
     wrap.appendChild(head);
 
+    /* speaking dashboard KPIs + volume chart */
+    var spStats = computeStats(list);
+    var spAvg = avg(spStats.perAct.speaking.scores);
+    var spWeek = list.filter(function (r) { return r.date >= addDays(today, -6); }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+    var spDays = Object.keys(list.reduce(function (m, r) { m[r.date] = 1; return m; }, {})).length;
+    wrap.appendChild(statGrid([
+      { icon: '⏱️', label: 'Total time', value: fmtMinutes(spStats.perAct.speaking.minutes), sub: list.length + ' sessions', color: '#10b981' },
+      { icon: '⭐', label: 'Avg score', value: spAvg != null ? spAvg + '/100' : '—', sub: 'self-rated', color: '#f59e0b' },
+      { icon: '📅', label: 'Last 7 days', value: fmtMinutes(spWeek), sub: 'this week', color: '#6366f1' },
+      { icon: '🗓️', label: 'Active days', value: String(spDays), sub: 'days with speaking', color: '#8b5cf6' }
+    ]));
+    var spChart = card('Speaking volume', 'Minutes (bars) vs average self-score (line) — last 14 days');
+    var spCanvas = el('canvas', 'chart');
+    spChart.appendChild(spCanvas);
+    wrap.appendChild(spChart);
+
     var goalCard = card('Today\u2019s speaking goal', 'Goal: ' + goals.speaking + ' minutes per day');
     goalCard.appendChild(goalRow('🎤', ACTIVITIES.speaking.color, 'Speaking minutes', todayMin, goals.speaking, 'min'));
     wrap.appendChild(goalCard);
@@ -693,6 +756,13 @@
       });
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { speakEditId = null; LT.render(); });
+
+    var spB = bucketize(list, 'day');
+    C.comboChart(spCanvas, {
+      labels: spB.labels,
+      bars: { values: spB.buckets.map(function (x) { return x.minutes; }), color: '#10b981' },
+      line: { values: spB.buckets.map(function (x) { return x.scores.length ? Math.round(x.scores.reduce(function (a, b) { return a + b; }, 0) / x.scores.length) : null; }), color: '#f59e0b', unit: ' score' }
+    });
   }
 
   /* ============================================================
@@ -707,6 +777,21 @@
     var head = el('div', 'page-head');
     head.innerHTML = '<h1>Think in English 💭</h1><p>Run a quick inner monologue about your day in English. No pressure — just describe what you see, do, and feel.</p>';
     wrap.appendChild(head);
+
+    /* think dashboard KPIs + frequency chart */
+    var thWeek = list.filter(function (r) { return r.date >= addDays(today, -6); }).length;
+    var thDays = Object.keys(list.reduce(function (m, r) { m[r.date] = 1; return m; }, {})).length;
+    var thStreak = computeStreak(list);
+    wrap.appendChild(statGrid([
+      { icon: '💭', label: 'Total sessions', value: String(list.length), sub: 'inner monologues', color: '#8b5cf6' },
+      { icon: '📅', label: 'Last 7 days', value: String(thWeek), sub: 'sessions this week', color: '#6366f1' },
+      { icon: '🔥', label: 'Streak', value: thStreak + ' day' + (thStreak === 1 ? '' : 's'), sub: 'consecutive days', color: '#f59e0b' },
+      { icon: '🗓️', label: 'Active days', value: String(thDays), sub: 'days with thinking', color: '#10b981' }
+    ]));
+    var thChart = card('Thinking frequency', 'Sessions per day — last 14 days');
+    var thCanvas = el('canvas', 'chart');
+    thChart.appendChild(thCanvas);
+    wrap.appendChild(thChart);
 
     var todayEntry = list.filter(function (r) { return r.date === today; }).length;
     var goalCard = card('Today', 'Goal: think in English once a day');
@@ -768,6 +853,9 @@
       LT.render();
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { thinkEditId = null; LT.render(); });
+
+    var thB = bucketize(list, 'day');
+    C.barChart(thCanvas, { labels: thB.labels, values: thB.buckets.map(function (x) { return x.count; }), color: '#8b5cf6', format: function (v) { return String(Math.round(v)); } });
   }
 
   /* ============================================================
@@ -784,6 +872,22 @@
     var head = el('div', 'page-head');
     head.innerHTML = '<h1>Listen & Imitate 🎧</h1><p>Listen to English audio or video, pause, and repeat what you heard. Shadowing builds pronunciation and rhythm.</p>';
     wrap.appendChild(head);
+
+    /* listen dashboard KPIs + volume chart */
+    var liStats = computeStats(list);
+    var liAvg = avg(liStats.perAct.listen.scores);
+    var liWeek = list.filter(function (r) { return r.date >= addDays(today, -6); }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+    var liDays = Object.keys(list.reduce(function (m, r) { m[r.date] = 1; return m; }, {})).length;
+    wrap.appendChild(statGrid([
+      { icon: '⏱️', label: 'Total time', value: fmtMinutes(liStats.perAct.listen.minutes), sub: list.length + ' sessions', color: '#6366f1' },
+      { icon: '⭐', label: 'Avg score', value: liAvg != null ? liAvg + '/100' : '—', sub: 'self-rated', color: '#10b981' },
+      { icon: '📅', label: 'Last 7 days', value: fmtMinutes(liWeek), sub: 'this week', color: '#8b5cf6' },
+      { icon: '🗓️', label: 'Active days', value: String(liDays), sub: 'days with listening', color: '#f59e0b' }
+    ]));
+    var liChart = card('Listening volume', 'Minutes (bars) vs average self-score (line) — last 14 days');
+    var liCanvas = el('canvas', 'chart');
+    liChart.appendChild(liCanvas);
+    wrap.appendChild(liChart);
 
     var goalCard = card('Today\u2019s goal', 'Goal: ' + goals.listen + ' minutes per day');
     goalCard.appendChild(goalRow('🎧', ACTIVITIES.listen.color, 'Listening minutes', todayMin, goals.listen, 'min'));
@@ -857,6 +961,13 @@
       });
     });
     document.getElementById('btn-cancel').addEventListener('click', function () { listenEditId = null; LT.render(); });
+
+    var liB = bucketize(list, 'day');
+    C.comboChart(liCanvas, {
+      labels: liB.labels,
+      bars: { values: liB.buckets.map(function (x) { return x.minutes; }), color: '#6366f1' },
+      line: { values: liB.buckets.map(function (x) { return x.scores.length ? Math.round(x.scores.reduce(function (a, b) { return a + b; }, 0) / x.scores.length) : null; }), color: '#10b981', unit: ' score' }
+    });
   }
 
   /* ============================================================
@@ -1071,14 +1182,27 @@
     var labels = bdata.labels;
     var pdata = phraseBuckets(progressMode);
 
-    var row1 = el('div', 'grid-2');
+    /* overall learning statistics */
+    var dm = dayMap(list);
+    var bestDay = 0;
+    Object.keys(dm).forEach(function (d) { if (dm[d].minutes > bestDay) bestDay = dm[d].minutes; });
+    var thisWeekMin = list.filter(function (r) { return r.date >= addDays(todayISO(), -6); }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+    var durSessions = list.filter(function (r) { return (r.duration || 0) > 0; }).length;
+    var pbdAll = phrasesByDay();
+    var weekPhrases = 0;
+    Object.keys(pbdAll).forEach(function (d) { if (d >= addDays(todayISO(), -6)) weekPhrases += pbdAll[d]; });
+    wrap.appendChild(statGrid([
+      { icon: '📝', label: 'Total sessions', value: String(list.length), sub: 'all activities', color: '#6366f1' },
+      { icon: '⏱️', label: 'This week', value: fmtMinutes(thisWeekMin), sub: 'last 7 days', color: '#10b981' },
+      { icon: '⚡', label: 'Best day', value: fmtMinutes(bestDay), sub: 'most in one day', color: '#f59e0b' },
+      { icon: '📈', label: 'Avg session', value: durSessions ? fmtMinutes(Math.round(stats.totalMinutes / durSessions)) : '—', sub: 'per timed session', color: '#8b5cf6' },
+      { icon: '💬', label: 'Phrases this week', value: String(weekPhrases), sub: 'last 7 days', color: '#06b6d4' },
+      { icon: '🗓️', label: 'Active days', value: String(stats.activeDays), sub: 'days with practice', color: '#ec4899' }
+    ]));
+
     var cTime = card('Practice time', 'Minutes per ' + progressMode);
     cTime.appendChild(el('canvas', 'chart'));
-    row1.appendChild(cTime);
-    var cScore = card('Score trend', 'Average self-score per ' + progressMode + ' — improvement over time');
-    cScore.appendChild(el('canvas', 'chart'));
-    row1.appendChild(cScore);
-    wrap.appendChild(row1);
+    wrap.appendChild(cTime);
 
     var cPhrases = card('Phrases learned', 'New phrases per ' + progressMode);
     cPhrases.appendChild(el('canvas', 'chart'));
@@ -1107,39 +1231,6 @@
     row2.appendChild(cDonut);
     wrap.appendChild(row2);
 
-    /* materials progress */
-    var row3 = el('div', 'grid-2');
-    var cRead = card('Reading log', 'Your books and stories');
-    var rl = el('div', 'mat-list');
-    if (!(reading.materials || []).length) rl.appendChild(el('p', 'cell-muted', 'No reading materials yet.'));
-    (reading.materials || []).forEach(function (m) {
-      var chs = m.chapters || [];
-      var pg = 0;
-      chs.forEach(function (ch) { pg += (typeof ch.pages === 'number' ? ch.pages : (ch.pages || []).length || 1); });
-      var row = el('div', 'mat-card');
-      row.innerHTML = '<div class="mat-emoji">📖</div>' +
-        '<div class="mat-main"><div class="mat-title">' + esc(m.title) + '</div>' +
-        '<div class="mat-meta">' + chs.length + ' chapter' + (chs.length === 1 ? '' : 's') + ' · ' + pg + ' page' + (pg === 1 ? '' : 's') + '</div></div>' +
-        '<div class="mat-actions"><a class="btn ghost small" href="#/english/read">Open</a></div>';
-      rl.appendChild(row);
-    });
-    cRead.appendChild(rl);
-    row3.appendChild(cRead);
-
-    var cWrite = card('Writing log', 'Your writing sessions');
-    var wl = el('div', 'mat-list');
-    if (!(writing.entries || []).length) wl.appendChild(el('p', 'cell-muted', 'No writing entries yet.'));
-    (writing.entries || []).slice().sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); }).slice(0, 8).forEach(function (x) {
-      var row = el('div', 'mat-card');
-      row.innerHTML = '<div class="mat-emoji">✍️</div>' +
-        '<div class="mat-main"><div class="mat-title">' + esc(x.title) + '</div>' +
-        '<div class="mat-meta">' + (x.pages || 1) + ' page' + ((x.pages || 1) === 1 ? '' : 's') + ' · ' + (x.date ? fmtDate(x.date) : 'no date') + ' · ' + (x.timeSpent ? fmtMinutes(x.timeSpent) : '— time') + '</div></div>' +
-        '<div class="mat-actions"><a class="btn ghost small" href="#/english/write">Open</a></div>';
-      wl.appendChild(row);
-    });
-    cWrite.appendChild(wl);
-    row3.appendChild(cWrite);
-    wrap.appendChild(row3);
     view.appendChild(wrap);
 
     C.barChart(cTime.querySelector('canvas'), {
@@ -1148,12 +1239,7 @@
       color: '#6366f1',
       format: function (v) { return fmtMinutes(v); }
     });
-    C.lineChart(cScore.querySelector('canvas'), {
-      labels: labels,
-      values: bdata.buckets.map(function (x) { return x.scores.length ? Math.round(x.scores.reduce(function (a, b) { return a + b; }, 0) / x.scores.length) : null; }),
-      color: '#10b981',
-      range: { min: 0, max: 100 }
-    });
+
     C.donutChart(cDonut.querySelector('canvas'), {
       segments: ACTIVITY_IDS.filter(function (a) { return stats.perAct[a].minutes > 0; })
         .map(function (a) { return { label: act(a).label, value: stats.perAct[a].minutes, color: act(a).color }; })
@@ -1506,7 +1592,8 @@
     readingTotals: readingTotals, writingTotals: writingTotals,
     computeStats: computeStats, computeStreak: computeStreak,
     bucketize: bucketize, dayMap: dayMap, phrasesByDay: phrasesByDay, phrasesTotal: phrasesTotal,
-    ui: { card: card, emptyState: emptyState, statusChip: statusChip, scoreChip: scoreChip, goalRow: goalRow, recordRow: recordRow, buildHeatmap: buildHeatmap, legendHTML: legendHTML },
+    phraseBuckets: phraseBuckets, seriesBuckets: seriesBuckets,
+    ui: { card: card, emptyState: emptyState, statusChip: statusChip, scoreChip: scoreChip, goalRow: goalRow, recordRow: recordRow, buildHeatmap: buildHeatmap, legendHTML: legendHTML, statGrid: statGrid },
     media: { fileToDataUrl: fileToDataUrl, compressImage: compressImage, mediaAttach: mediaAttach, rowMediaBar: rowMediaBar }
   };
 
