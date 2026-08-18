@@ -22,9 +22,10 @@
 
   function readView(view) {
     var reading = E.getReading();
+    var dur = E.getDurations();
     var wrap = el('div', 'view-body');
     var head = el('div', 'page-head');
-    head.innerHTML = '<h1>Read Aloud 📖</h1><p>Books, stories, chapters, pages and recordings — all on one page, no opening anything.</p>';
+    head.innerHTML = '<h1>Read Aloud 📖</h1><p class="head-dur">⏱️ ' + dur.read + ' min</p><p>Books, stories, chapters, pages and recordings — all on one page, no opening anything.</p>';
     wrap.appendChild(head);
 
     /* read aloud dashboard KPIs + progress chart */

@@ -48,7 +48,7 @@
     ai:     { label: 'With AI',             icon: '🤖' }
   };
   var DEFAULT_GOALS = { speaking: 15, think: 1, listen: 15, readAloud: 2, writing: 1, phrases: 5 };
-  var DEFAULT_DURATIONS = { think: 10, phrases: 5 };
+  var DEFAULT_DURATIONS = { think: 10, phrases: 5, read: 10 };
 
   function act(id) { return ACTIVITIES[id] || ACTIVITIES.speaking; }
 
@@ -734,7 +734,7 @@
     var qs = [
       { icon: '🎤', label: 'Speak', sub: 'pick a topic, talk 10–15 min', href: '#/english/speaking' },
       { icon: '🎧', label: 'Listen & imitate', sub: 'pause, repeat, shadow', href: '#/english/listen' },
-      { icon: '📖', label: 'Read aloud', sub: 'continue your material', href: '#/english/read' },
+      { icon: '📖', label: 'Read aloud', sub: '⏱ ' + dur.read + ' min · continue your material', href: '#/english/read' },
       { icon: '✍️', label: 'Write a page', sub: 'continue where you stopped', href: '#/english/write' },
       { icon: '💬', label: 'Learn 5 phrases', sub: '⏱ ' + dur.phrases + ' min · add or review', href: '#/english/phrases' },
       { icon: '💭', label: 'Think in English', sub: '⏱ ' + dur.think + ' min · inner monologue', href: '#/english/think' }
@@ -1491,7 +1491,8 @@
     var durations = getDurations();
     var durKeys = [
       { key: 'think', label: 'Think in English', icon: '💭' },
-      { key: 'phrases', label: 'Common Phrases', icon: '💬' }
+      { key: 'phrases', label: 'Common Phrases', icon: '💬' },
+      { key: 'read', label: 'Read Aloud', icon: '📖' }
     ];
     durKeys.forEach(function (dk) {
       var df = el('div', 'set-field');

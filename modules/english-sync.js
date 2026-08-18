@@ -62,8 +62,18 @@
   ];
 
   /* ---- config / state ---- */
+  /* PRODUCTION: set this to the deployed sync-backend HTTP URL (the Function
+     Compute lifetrack-backend-fc trigger URL) once the backend is published.
+     Leave '' for local development - the app then defaults to localhost:3000. */
+  var PRODUCTION_SYNC_BASE = '';
+  function isLocalHost() {
+    var h = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+    return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  }
   function defaultConfig() {
-    return { mode: 'local', baseUrl: 'http://localhost:3000', autoPush: true };
+    var base = 'http://localhost:3000';
+    if (!isLocalHost() && PRODUCTION_SYNC_BASE) base = PRODUCTION_SYNC_BASE;
+    return { mode: 'local', baseUrl: base, autoPush: true };
   }
   function getConfig() {
     var c = Store.get(CFG_KEY, null);
@@ -73,6 +83,11 @@
       c = { mode: 'local', baseUrl: c.baseUrl || 'http://localhost:3000', autoPush: !!c.autoPush };
     }
     if (c.autoPush === undefined) c.autoPush = true;
+    /* apply production sync base to returning visitors with a legacy localhost default */
+    if (!isLocalHost() && PRODUCTION_SYNC_BASE) {
+      var legacyLocal = !c.baseUrl || c.baseUrl.indexOf('localhost') !== -1 || c.baseUrl.indexOf('127.0.0.1') !== -1;
+      if (legacyLocal) c.baseUrl = PRODUCTION_SYNC_BASE;
+    }
     return c;
   }
   function saveConfig(c) { Store.set(CFG_KEY, c); }
