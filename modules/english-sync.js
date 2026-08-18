@@ -1,17 +1,23 @@
-﻿/* ============================================================
-   LifeTrack - English Learning - MongoDB sync
+/* ============================================================
+   LifeTrack - English Learning - MongoDB sync (auto-save)
    Connects the journal to MongoDB through the local sync server
    (lifetrack-server), which bridges to MongoDB Atlas using the
    official MongoDB driver.
 
-   The old "Atlas Data API" mode was removed: MongoDB shut that
-   service down on 2025-09-30, so it can never work again.
+   Auto-save flow:
+     user changes data -> frontend state updates (localStorage)
+     -> debounced (600ms) whole-dataset push for frequent inputs
+     -> immediate push for discrete actions (add/complete/delete)
+     -> backend upserts into MongoDB (no duplicate records)
+   On startup:
+     - if a change was left unsynced (dirty), push it first
+     - if this browser has no local data, pull MongoDB (source of truth)
+
+   Save indicators: "Saving...", "Saved", "Unable to save - Retrying..."
 
    Setup:
      - Start the sync server:  lifetrack-server  (npm start)
-     - In the app: Settings -> MongoDB sync
-     - Server URL: http://localhost:3000
-     - Test connection, then Push local -> MongoDB
+     - The app defaults to  http://localhost:3000  (Settings -> MongoDB sync)
 
    Each dataset lives in its own collection (document _id "main"):
      english_records, english_reading, english_writing,
@@ -28,20 +34,21 @@
 
   var CFG_KEY = 'english.syncConfig';
   var STATE_KEY = 'english.syncState';
-  /* migrate configs saved under earlier/broken key names (older preview builds) */
+
+  /* migrate configs saved under earlier fully-prefixed key names */
   (function migrateOldKeys() {
-    var oldCfg = ['lifetr\u2026nfig', 'lifetrack.english.syncConfig'];
-    var oldState = ['lifetr\u2026tate', 'lifetrack.english.syncState'];
-    for (var i = 0; i < oldCfg.length; i++) {
-      if (Store.get(CFG_KEY, null) === null) {
+    var oldCfg = ['lifetrack.english.syncConfig'];
+    var oldState = ['lifetrack.english.syncState'];
+    if (Store.get(CFG_KEY, null) === null) {
+      for (var i = 0; i < oldCfg.length; i++) {
         var v = Store.get(oldCfg[i], null);
-        if (v !== null) { Store.set(CFG_KEY, v); Store.remove(oldCfg[i]); }
+        if (v !== null) { Store.set(CFG_KEY, v); Store.remove(oldCfg[i]); break; }
       }
     }
-    for (var j = 0; j < oldState.length; j++) {
-      if (Store.get(STATE_KEY, null) === null) {
+    if (Store.get(STATE_KEY, null) === null) {
+      for (var j = 0; j < oldState.length; j++) {
         var v2 = Store.get(oldState[j], null);
-        if (v2 !== null) { Store.set(STATE_KEY, v2); Store.remove(oldState[j]); }
+        if (v2 !== null) { Store.set(STATE_KEY, v2); Store.remove(oldState[j]); break; }
       }
     }
   })();
@@ -51,17 +58,21 @@
     { key: 'reading', name: 'english_reading', get: function () { return E.getReading(); }, set: function (v) { E.saveReading(v); } },
     { key: 'writing', name: 'english_writing', get: function () { return E.getWriting(); }, set: function (v) { E.saveWriting(v); } },
     { key: 'phrases', name: 'english_phrases', get: function () { return E.getPhrases(); }, set: function (v) { E.savePhrases(v); } },
-    { key: 'settings', name: 'english_settings', get: function () { return E.getGoals(); }, set: function (v) { E.saveGoals(v); } }
+    { key: 'settings', name: 'english_settings', get: function () { return E.getSettingsSnapshot(); }, set: function (v) { E.applySettingsSnapshot(v); } }
   ];
 
+  /* ---- config / state ---- */
+  function defaultConfig() {
+    return { mode: 'local', baseUrl: 'http://localhost:3000', autoPush: true };
+  }
   function getConfig() {
     var c = Store.get(CFG_KEY, null);
-    /* old Atlas Data API configs (mode 'atlas' with endpoint/apiKey) are
-       migrated to sync-server mode - the Data API was shut down in 2025 */
-    if (c && (c.mode !== 'local' || !c.baseUrl)) {
+    if (!c) return defaultConfig();
+    /* old Atlas Data API configs (mode 'atlas') migrate to sync-server mode */
+    if (c.mode !== 'local' || !c.baseUrl) {
       c = { mode: 'local', baseUrl: c.baseUrl || 'http://localhost:3000', autoPush: !!c.autoPush };
-      saveConfig(c);
     }
+    if (c.autoPush === undefined) c.autoPush = true;
     return c;
   }
   function saveConfig(c) { Store.set(CFG_KEY, c); }
@@ -71,6 +82,42 @@
   function isConfigured() {
     var c = getConfig();
     return !!(c && c.baseUrl);
+  }
+  function markDirty() { var st = getState(); st.dirty = true; saveState(st); }
+  function markClean() { var st = getState(); st.dirty = false; saveState(st); }
+
+  /* ---- save-state indicator (subtle, fixed bottom pill) ---- */
+  var statusEl = null, statusTimer = null;
+  function ensureStatusEl() {
+    if (statusEl) return statusEl;
+    statusEl = document.createElement('div');
+    statusEl.id = 'sync-status';
+    statusEl.setAttribute('role', 'status');
+    statusEl.setAttribute('aria-live', 'polite');
+    statusEl.style.cssText =
+      'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;' +
+      'background:rgba(17,24,39,.94);color:#e5e7eb;font:600 13px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+      'padding:8px 14px;border-radius:999px;box-shadow:0 4px 18px rgba(0,0,0,.22);' +
+      'opacity:0;pointer-events:none;transition:opacity .25s ease;white-space:nowrap;';
+    document.body.appendChild(statusEl);
+    return statusEl;
+  }
+  function setSaveStatus(state) {
+    var el = ensureStatusEl();
+    var map = {
+      saving: { text: 'Saving…', color: '#e5e7eb' },
+      saved: { text: '✓ Saved', color: '#34d399' },
+      error: { text: '⚠ Unable to save — Retrying…', color: '#fbbf24' }
+    };
+    if (!map[state]) { el.style.opacity = '0'; return; }
+    var m = map[state];
+    el.textContent = m.text;
+    el.style.color = m.color;
+    el.style.opacity = '1';
+    if (statusTimer) clearTimeout(statusTimer);
+    if (state === 'saved' || state === 'error') {
+      statusTimer = setTimeout(function () { el.style.opacity = '0'; }, state === 'saved' ? 1800 : 6000);
+    }
   }
 
   /* ---------------- HTTP plumbing ---------------- */
@@ -112,19 +159,24 @@
   function pushAll(silent) {
     var cfg = getConfig();
     if (!cfg || !isConfigured()) return Promise.resolve(false);
+    setSaveStatus('saving');
     var payload = {};
     COLLECTIONS.forEach(function (col) { payload[col.key] = col.get(); });
     return localCall('/api/data', 'POST', payload).then(function () {
       var st = getState();
       st.lastPush = new Date().toISOString();
       st.lastError = null;
+      st.dirty = false;
       saveState(st);
-      if (!silent) toast('Pushed local data to MongoDB');
+      setSaveStatus('saved');
+      if (!silent) toast('Saved to MongoDB');
       return true;
     }).catch(function (err) {
       var st = getState();
       st.lastError = err.message || String(err);
+      st.dirty = true; /* keep dirty so we retry and never lose the change */
       saveState(st);
+      setSaveStatus('error');
       if (!silent) toast('Sync failed: ' + (err.message || err));
       return false;
     });
@@ -141,12 +193,13 @@
         if (data[col.key] !== undefined && data[col.key] !== null) { col.set(data[col.key]); found = true; }
       });
       return found;
-    }).then(function () {
+    }).then(function (found) {
       var st = getState();
       st.lastPull = new Date().toISOString();
       st.lastError = null;
+      if (found) st.dirty = false;
       saveState(st);
-      if (!silent) toast('Pulled MongoDB data into this browser');
+      if (!silent) toast('Loaded data from MongoDB');
       return true;
     }).catch(function (err) {
       var st = getState();
@@ -157,18 +210,53 @@
     }).finally(function () { suppressPush = false; });
   }
 
-  /* ---------------- Auto-push (optional) ---------------- */
+  /* ---------------- Auto-push ---------------- */
   var pushTimer = null;
   var suppressPush = false;
-  function maybeAutoPush() {
+  function maybeAutoPush(immediate) {
     if (suppressPush) return;
     var cfg = getConfig();
     if (!cfg || !cfg.autoPush || !isConfigured()) return;
+    markDirty();
+    if (immediate) {
+      if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+      pushAll(true);
+      return;
+    }
     if (pushTimer) clearTimeout(pushTimer);
-    pushTimer = setTimeout(function () { pushAll(true); }, 1500);
+    setSaveStatus('saving');
+    pushTimer = setTimeout(function () { pushTimer = null; pushAll(true); }, 600);
   }
-  /* fired from the core data layer on every save */
+  /* fired from the core data layer on every save (immediate=true for actions) */
   window.LTEnglish._onDataChange = maybeAutoPush;
+
+  /* ---------------- Startup hydration (MongoDB = source of truth) ---------------- */
+  function settingsCustomized() {
+    var dur = E.getDurations();
+    if (dur && (dur.think !== 10 || dur.phrases !== 5)) return true;
+    var g = E.getGoals();
+    var dg = E.DEFAULT_GOALS || {};
+    for (var k in dg) { if (g[k] !== dg[k]) return true; }
+    return false;
+  }
+  function hasAnyLocalData() {
+    return (E.getRecords().length > 0) ||
+      (E.getPhrases().length > 0) ||
+      ((E.getReading().materials || []).length > 0) ||
+      ((E.getWriting().entries || []).length > 0) ||
+      settingsCustomized();
+  }
+  function bootstrapSync() {
+    if (!isConfigured()) return;
+    if (getState().dirty) {
+      /* a change was left unsynced when the page closed -> recover it first */
+      pushAll(true).then(function () { if (!hasAnyLocalData()) pullAll(true); });
+    } else if (!hasAnyLocalData()) {
+      /* fresh browser -> hydrate from MongoDB instead of defaults */
+      pullAll(true);
+    }
+  }
+  setTimeout(bootstrapSync, 400);
 
   /* ---------------- UI: dashboard pill ---------------- */
   function renderPill() {
@@ -182,9 +270,9 @@
     var st = getState();
     var last = st.lastPush || st.lastPull;
     pill.href = '#/english/settings';
-    pill.title = 'Sync now - push local data to MongoDB';
+    pill.title = 'Auto-saves to MongoDB';
     pill.innerHTML = '\u2601 <span class="sync-label">MongoDB' +
-      (last ? ' - synced ' + esc(last.slice(0, 10)) : '') +
+      (last ? ' - synced ' + esc(last.slice(0, 10)) : ' - auto-save on') +
       (st.lastError ? ' - error' : '') + '</span>';
     pill.addEventListener('click', function (e) {
       if (isConfigured()) {
@@ -200,14 +288,14 @@
     var card = el('div', 'card');
     card.appendChild(el('h2', null, 'MongoDB sync'));
     card.appendChild(el('div', 'card-sub',
-      'Store your journal in MongoDB Atlas. Start the sync server (lifetrack-server), then point the app at it.'));
+      'Your changes auto-save to MongoDB. Start the sync server (lifetrack-server), then point the app at it.'));
 
     var form = el('div', 'form-grid');
     form.id = 'sync-form';
     card.appendChild(form);
 
     var help = el('div', 'about-line');
-    help.textContent = 'Start the sync server first (lifetrack-server folder: npm start), then enter its address below.';
+    help.textContent = 'Start the sync server first (lifetrack-server folder: npm start). The app defaults to http://localhost:3000.';
     card.appendChild(help);
 
     var status = el('div', 'about-line');
@@ -225,14 +313,14 @@
     var c = getConfig() || {};
     form.innerHTML =
       '<label class="span2">Server URL<input id="sync-base" type="text" placeholder="http://localhost:3000"></label>' +
-      '<label>Auto-push after changes<input id="sync-auto" type="checkbox" style="width:auto;align-self:flex-start;margin-top:6px"></label>';
+      '<label>Auto-save changes<input id="sync-auto" type="checkbox" style="width:auto;align-self:flex-start;margin-top:6px"></label>';
     form.querySelector('#sync-base').value = c.baseUrl || 'http://localhost:3000';
     form.querySelector('#sync-auto').checked = !!c.autoPush;
 
     function refreshStatus() {
       if (!isConfigured()) { status.textContent = 'Not connected - enter the server URL, then test.'; return; }
       var s = getState();
-      var parts = ['Connected (sync server)'];
+      var parts = ['Connected (auto-save on)'];
       if (s.lastPush) parts.push('pushed ' + s.lastPush.slice(0, 16).replace('T', ' '));
       if (s.lastPull) parts.push('pulled ' + s.lastPull.slice(0, 16).replace('T', ' '));
       if (s.lastError) parts.push('last error: ' + s.lastError);
@@ -293,6 +381,7 @@
     testConnection: testConnection,
     pushAll: pushAll,
     pullAll: pullAll,
+    setSaveStatus: setSaveStatus,
     renderPill: renderPill,
     renderSettings: renderSettings
   };

@@ -53,31 +53,47 @@
   function act(id) { return ACTIVITIES[id] || ACTIVITIES.speaking; }
 
   /* ---------------- Records ---------------- */
-  function notifyChange() {
+  function notifyChange(immediate) {
     if (window.LTEnglish && typeof window.LTEnglish._onDataChange === 'function') {
-      try { window.LTEnglish._onDataChange(); } catch (e) { /* hook error */ }
+      try { window.LTEnglish._onDataChange(!!immediate); } catch (e) { /* hook error */ }
     }
   }
+  /* stable device id -- identifies this browser for MongoDB persistence */
+  function getUserId() {
+    var id = Store.get('english.userId', null);
+    if (!id) { id = uid(); Store.set('english.userId', id); }
+    return id;
+  }
+  /* enrich a record with completion/persistence metadata (additive, non-breaking) */
+  function enrichRecord(r) {
+    if (!r) return r;
+    r.userId = r.userId || getUserId();
+    r.moduleId = r.moduleId || r.activity;
+    r.taskId = r.taskId || r.id;
+    if ((r.status === 'done' || !r.status) && !r.completedAt) r.completedAt = new Date().toISOString();
+    return r;
+  }
   function getRecords() { return Store.get(REC_KEY, []); }
-  function saveRecords(list) { Store.set(REC_KEY, list); notifyChange(); }
+  function saveRecords(list, immediate) { Store.set(REC_KEY, list); notifyChange(immediate); }
   function addRecord(r) {
     var list = getRecords();
     r.id = r.id || uid();
     r.date = r.date || todayISO();
+    enrichRecord(r);
     list.push(r);
-    saveRecords(list);
+    saveRecords(list, true);
     return r;
   }
   function updateRecord(id, patch) {
     var list = getRecords();
     var hit = null;
-    list = list.map(function (x) { if (x.id === id) { hit = Object.assign({}, x, patch); return hit; } return x; });
-    saveRecords(list);
+    list = list.map(function (x) { if (x.id === id) { hit = Object.assign({}, x, patch); enrichRecord(hit); return hit; } return x; });
+    saveRecords(list, true);
     return hit;
   }
   function deleteRecord(id) {
     var list = getRecords().filter(function (r) { return r.id !== id; });
-    saveRecords(list);
+    saveRecords(list, true);
   }
   function sortByDateDesc(list) {
     return list.slice().sort(function (a, b) {
@@ -98,7 +114,7 @@
         id: uid(), date: todayISO(), ref: { type: refType, id: refId }
       }, data));
     }
-    saveRecords(list);
+    saveRecords(list, true);
     return existing;
   }
 
@@ -186,6 +202,7 @@
     if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
     ACTIVITY_IDS.forEach(function (a) { if (typeof g[a] === 'number') s[a] = g[a]; });
     Store.set(SET_KEY, s);
+    notifyChange(true);
   }
   function getDurations() {
     var s = Store.get(SET_KEY, {}) || {};
@@ -201,8 +218,26 @@
     if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
     s.__durations = Object.assign({}, d);
     Store.set(SET_KEY, s);
+    notifyChange(true);
   }
   function clearSettings() { Store.set(SET_KEY, {}); }
+  function getSettingsSnapshot() {
+    return { goals: getGoals(), durations: getDurations(), celebrations: getCelebrations() };
+  }
+  function applySettingsSnapshot(data) {
+    if (!data || typeof data !== 'object') return;
+    var hasGoals = false;
+    ACTIVITY_IDS.forEach(function (a) { if (typeof data[a] === 'number') hasGoals = true; });
+    if (data.goals && typeof data.goals === 'object') { saveGoals(data.goals); }
+    else if (hasGoals) { saveGoals(data); }
+    if (data.durations && typeof data.durations === 'object') { saveDurations(data.durations); }
+    if (Array.isArray(data.celebrations)) {
+      var s = Store.get(SET_KEY, {});
+      if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+      s.__celebrations = data.celebrations.slice(-200);
+      Store.set(SET_KEY, s);
+    }
+  }
   function getCelebrations() {
     var s = Store.get(SET_KEY, {}) || {};
     return Array.isArray(s.__celebrations) ? s.__celebrations : [];
@@ -1767,6 +1802,7 @@
     getWriting: getWriting, saveWriting: saveWriting,
     getPhrases: getPhrases, savePhrases: savePhrases,
     getGoals: getGoals, saveGoals: saveGoals, getDurations: getDurations, saveDurations: saveDurations,
+    getUserId: getUserId, getSettingsSnapshot: getSettingsSnapshot, applySettingsSnapshot: applySettingsSnapshot,
     onTaskComplete: onTaskComplete,
     wordCount: wordCount, pageLabel: pageLabel,
     readingTotals: readingTotals, writingTotals: writingTotals,
