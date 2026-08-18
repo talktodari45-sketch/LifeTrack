@@ -92,6 +92,7 @@
           notes: entry.pages + (entry.pages === 1 ? ' page' : ' pages'),
           status: 'done', score: 0, createdAt: entry.createdAt
         });
+        if (!editId) E.onTaskComplete('writing');
         editId = null;
         LT.render();
       });

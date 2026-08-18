@@ -210,6 +210,7 @@
           pages: n,
           status: 'done', score: null, createdAt: Date.now()
         });
+        if (!editing) E.onTaskComplete('readAloud');
         editChKey = null;
         LT.render();
       });

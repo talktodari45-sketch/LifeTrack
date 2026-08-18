@@ -48,6 +48,7 @@
     ai:     { label: 'With AI',             icon: '🤖' }
   };
   var DEFAULT_GOALS = { speaking: 15, think: 1, listen: 15, readAloud: 2, writing: 1, phrases: 5 };
+  var DEFAULT_DURATIONS = { think: 10, phrases: 5 };
 
   function act(id) { return ACTIVITIES[id] || ACTIVITIES.speaking; }
 
@@ -174,8 +175,152 @@
     return list;
   }
   function savePhrases(list) { Store.set(PHRASE_KEY, list); notifyChange(); }
-  function getGoals() { return Object.assign({}, DEFAULT_GOALS, Store.get(SET_KEY, {})); }
-  function saveGoals(g) { Store.set(SET_KEY, g); }
+  function getGoals() {
+    var s = Store.get(SET_KEY, {}) || {};
+    var out = {};
+    ACTIVITY_IDS.forEach(function (a) { out[a] = (typeof s[a] === 'number') ? s[a] : DEFAULT_GOALS[a]; });
+    return out;
+  }
+  function saveGoals(g) {
+    var s = Store.get(SET_KEY, {});
+    if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+    ACTIVITY_IDS.forEach(function (a) { if (typeof g[a] === 'number') s[a] = g[a]; });
+    Store.set(SET_KEY, s);
+  }
+  function getDurations() {
+    var s = Store.get(SET_KEY, {}) || {};
+    var d = (s && s.__durations && typeof s.__durations === 'object') ? s.__durations : {};
+    var out = {};
+    Object.keys(DEFAULT_DURATIONS).forEach(function (k) {
+      out[k] = (typeof d[k] === 'number') ? d[k] : DEFAULT_DURATIONS[k];
+    });
+    return out;
+  }
+  function saveDurations(d) {
+    var s = Store.get(SET_KEY, {});
+    if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+    s.__durations = Object.assign({}, d);
+    Store.set(SET_KEY, s);
+  }
+  function clearSettings() { Store.set(SET_KEY, {}); }
+  function getCelebrations() {
+    var s = Store.get(SET_KEY, {}) || {};
+    return Array.isArray(s.__celebrations) ? s.__celebrations : [];
+  }
+  function recordCelebration(kind, activity) {
+    var s = Store.get(SET_KEY, {});
+    if (!s || typeof s !== 'object' || Array.isArray(s)) s = {};
+    if (!Array.isArray(s.__celebrations)) s.__celebrations = [];
+    s.__celebrations.push({ kind: kind, activity: activity, date: todayISO(), at: Date.now() });
+    if (s.__celebrations.length > 200) s.__celebrations = s.__celebrations.slice(-200);
+    Store.set(SET_KEY, s);
+  }
+  function alreadyCelebrated(kind, activity) {
+    var d = todayISO();
+    return getCelebrations().some(function (c) { return c.kind === kind && c.activity === activity && c.date === d; });
+  }
+  function todayProgress(activity) {
+    var today = todayISO();
+    var recs = getRecords().filter(function (r) { return r.activity === activity && r.date === today; });
+    if (activity === 'speaking' || activity === 'listen') {
+      return recs.reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+    }
+    if (activity === 'think' || activity === 'writing') {
+      return recs.length;
+    }
+    if (activity === 'readAloud') {
+      return recs.reduce(function (a, r) { return a + (r.pages || 0); }, 0);
+    }
+    if (activity === 'phrases') {
+      return phrasesByDay()[today] || 0;
+    }
+    return 0;
+  }
+  /* ---- Task-complete celebrations: small confetti + big module-complete blast ---- */
+  function runConfetti(canvas, big) {
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width = window.innerWidth;
+    var H = canvas.height = window.innerHeight;
+    var colors = ['#10b981', '#8b5cf6', '#6366f1', '#f59e0b', '#06b6d4', '#ec4899', '#fbbf24', '#fde68a', '#ffffff'];
+    var parts = [];
+    var perBurst = big ? 110 : 120;
+    var bursts = big ? 3 : 1;
+    for (var b = 0; b < bursts; b++) {
+      var bx = W * (bursts === 1 ? 0.5 : (0.3 + 0.4 * b / (bursts - 1)));
+      var by = H * 0.34;
+      for (var i = 0; i < perBurst; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = (big ? 7 : 5) + Math.random() * (big ? 13 : 8);
+        parts.push({
+          x: bx, y: by,
+          vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 3,
+          size: 4 + Math.random() * (big ? 8 : 5),
+          color: colors[Math.floor(Math.random() * colors.length)],
+          rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 0.3,
+          life: 0, maxLife: 80 + Math.random() * 60,
+          gravity: 0.12 + Math.random() * 0.09,
+          shape: Math.random() < 0.5 ? 'rect' : 'circle'
+        });
+      }
+    }
+    var started = Date.now();
+    function frame() {
+      ctx.clearRect(0, 0, W, H);
+      var alive = false;
+      for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        if (p.life >= p.maxLife) continue;
+        alive = true;
+        p.life++;
+        p.vy += p.gravity; p.vx *= 0.99;
+        p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        var alpha = Math.max(0, 1 - p.life / p.maxLife);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        if (p.shape === 'rect') ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        else { ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx.fill(); }
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      if (alive && Date.now() - started < 2600) requestAnimationFrame(frame);
+      else ctx.clearRect(0, 0, W, H);
+    }
+    requestAnimationFrame(frame);
+  }
+  function celebrate(kind) {
+    var big = kind === 'big';
+    var overlay = el('div', 'celeb-overlay' + (big ? ' big' : ''));
+    var emoji = big ? '🎉🎉🎉' : '🎉';
+    overlay.innerHTML = '<div class="celeb-glow"></div><canvas class="celeb-canvas"></canvas>' +
+      '<div class="celeb-card' + (big ? ' big' : '') + '">' +
+      '<div class="celeb-emoji">' + emoji + '</div>' +
+      '<div class="celeb-title">' + (big ? 'CONGRATULATIONS!' : 'Great Job!') + '</div>' +
+      '<div class="celeb-sub">' + (big ? 'You completed the entire task!' : 'Task Complete!') + '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced) runConfetti(overlay.querySelector('.celeb-canvas'), big);
+    var dur = big ? 3000 : 1600;
+    setTimeout(function () {
+      overlay.classList.add('fade');
+      setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 450);
+    }, dur);
+  }
+  function onTaskComplete(activity) {
+    var goals = getGoals();
+    var goal = goals[activity] || 0;
+    var prog = todayProgress(activity);
+    if (goal > 0 && prog >= goal && !alreadyCelebrated('big', activity)) {
+      recordCelebration('big', activity);
+      celebrate('big');
+    } else {
+      recordCelebration('small', activity);
+      celebrate('small');
+    }
+  }
 
   function wordCount(text) {
     var t = String(text || '').trim();
@@ -493,6 +638,7 @@
     var pbd = phrasesByDay();
     var reading = getReading(), writing = getWriting();
     var rTot = readingTotals(reading), wTot = writingTotals(writing);
+    var dur = getDurations();
 
     var wrap = el('div', 'view-body');
     var hour = new Date().getHours();
@@ -515,8 +661,7 @@
       { icon: '⏱️', label: 'Total practice', value: fmtMinutes(stats.totalMinutes), sub: stats.activeDays + ' active days', color: '#6366f1' },
       { icon: '💬', label: 'Phrases learned', value: String(phrasesTotal()), sub: 'all time', color: '#06b6d4' },
       { icon: '📖', label: 'Pages read', value: rTot.done, sub: rTot.chapters + ' chapters', color: '#f59e0b' },
-      { icon: '✍️', label: 'Pages written', value: wTot.done, sub: wTot.total + ' total pages', color: '#ec4899' },
-      { icon: '⭐', label: 'Avg score', value: stats.avgScore != null ? stats.avgScore + '/100' : '—', sub: 'self-rated sessions', color: '#10b981' }
+      { icon: '✍️', label: 'Pages written', value: wTot.done, sub: wTot.total + ' total pages', color: '#ec4899' }
     ];
     var grid = el('div', 'stat-grid');
     cards.forEach(function (c) {
@@ -556,8 +701,8 @@
       { icon: '🎧', label: 'Listen & imitate', sub: 'pause, repeat, shadow', href: '#/english/listen' },
       { icon: '📖', label: 'Read aloud', sub: 'continue your material', href: '#/english/read' },
       { icon: '✍️', label: 'Write a page', sub: 'continue where you stopped', href: '#/english/write' },
-      { icon: '💬', label: 'Learn 5 phrases', sub: 'add or review phrases', href: '#/english/phrases' },
-      { icon: '💭', label: 'Think in English', sub: '2 minutes of inner monologue', href: '#/english/think' }
+      { icon: '💬', label: 'Learn 5 phrases', sub: '⏱ ' + dur.phrases + ' min · add or review', href: '#/english/phrases' },
+      { icon: '💭', label: 'Think in English', sub: '⏱ ' + dur.think + ' min · inner monologue', href: '#/english/think' }
     ];
     qs.forEach(function (q) {
       var a = el('a', 'quick-btn');
@@ -651,16 +796,14 @@
 
     /* speaking dashboard KPIs + volume chart */
     var spStats = computeStats(list);
-    var spAvg = avg(spStats.perAct.speaking.scores);
     var spWeek = list.filter(function (r) { return r.date >= addDays(today, -6); }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
     var spDays = Object.keys(list.reduce(function (m, r) { m[r.date] = 1; return m; }, {})).length;
     wrap.appendChild(statGrid([
       { icon: '⏱️', label: 'Total time', value: fmtMinutes(spStats.perAct.speaking.minutes), sub: list.length + ' sessions', color: '#10b981' },
-      { icon: '⭐', label: 'Avg score', value: spAvg != null ? spAvg + '/100' : '—', sub: 'self-rated', color: '#f59e0b' },
       { icon: '📅', label: 'Last 7 days', value: fmtMinutes(spWeek), sub: 'this week', color: '#6366f1' },
       { icon: '🗓️', label: 'Active days', value: String(spDays), sub: 'days with speaking', color: '#8b5cf6' }
     ]));
-    var spChart = card('Speaking volume', 'Minutes (bars) vs average self-score (line) — last 14 days');
+    var spChart = card('Speaking volume', 'Minutes per day — last 14 days');
     var spCanvas = el('canvas', 'chart');
     spChart.appendChild(spCanvas);
     wrap.appendChild(spChart);
@@ -750,7 +893,7 @@
           createdAt: Date.now()
         };
         if (speakEditId) { updateRecord(speakEditId, rec); toast('Session updated'); }
-        else { addRecord(rec); toast('Session saved'); }
+        else { addRecord(rec); toast('Session saved'); onTaskComplete('speaking'); }
         speakEditId = null;
         LT.render();
       });
@@ -758,10 +901,11 @@
     document.getElementById('btn-cancel').addEventListener('click', function () { speakEditId = null; LT.render(); });
 
     var spB = bucketize(list, 'day');
-    C.comboChart(spCanvas, {
+    C.barChart(spCanvas, {
       labels: spB.labels,
-      bars: { values: spB.buckets.map(function (x) { return x.minutes; }), color: '#10b981' },
-      line: { values: spB.buckets.map(function (x) { return x.scores.length ? Math.round(x.scores.reduce(function (a, b) { return a + b; }, 0) / x.scores.length) : null; }), color: '#f59e0b', unit: ' score' }
+      values: spB.buckets.map(function (x) { return x.minutes; }),
+      color: '#10b981',
+      format: function (v) { return fmtMinutes(v); }
     });
   }
 
@@ -774,8 +918,9 @@
     var list = getRecords().filter(function (r) { return r.activity === 'think'; });
     var today = todayISO();
     var wrap = el('div', 'view-body');
+    var dur = getDurations();
     var head = el('div', 'page-head');
-    head.innerHTML = '<h1>Think in English 💭</h1><p>Run a quick inner monologue about your day in English. No pressure — just describe what you see, do, and feel.</p>';
+    head.innerHTML = '<h1>Think in English 💭</h1><p class="head-dur">⏱️ ' + dur.think + ' min</p><p>Run a quick inner monologue about your day in English. No pressure — just describe what you see, do, and feel.</p>';
     wrap.appendChild(head);
 
     /* think dashboard KPIs + frequency chart */
@@ -794,7 +939,8 @@
     wrap.appendChild(thChart);
 
     var todayEntry = list.filter(function (r) { return r.date === today; }).length;
-    var goalCard = card('Today', 'Goal: think in English once a day');
+    var todayMins = list.filter(function (r) { return r.date === today; }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+    var goalCard = card('Today', 'Goal: think in English once a day' + (todayMins ? ' · ' + todayMins + ' min today' : ''));
     goalCard.appendChild(goalRow('💭', ACTIVITIES.think.color, 'Think in English', todayEntry, 1, 'session'));
     wrap.appendChild(goalCard);
 
@@ -803,6 +949,7 @@
       '<h2 id="form-title">Log today\u2019s thinking</h2>' +
       '<div class="form-grid">' +
       '  <label>Date<input name="date" type="date" required></label>' +
+      '  <label>Minutes spent<input name="duration" type="number" min="0" max="600" placeholder="optional"></label>' +
       '  <label>Situation<textarea name="topic" rows="2" required placeholder="e.g. Thinking about my to-do list while making coffee"></textarea></label>' +
       '  <label class="span2">What did you manage to express?<textarea name="notes" rows="2" placeholder="e.g. Could describe the steps easily, but struggled with \u201cboiling water\u201d — kettle?"></textarea></label>' +
       '  <label>Status<select name="status"><option value="done">Done — I thought in English</option><option value="partial">Partly</option></select></label>' +
@@ -835,6 +982,7 @@
       if (rec) {
         f.date.value = rec.date; f.topic.value = rec.topic || '';
         f.notes.value = rec.notes || ''; f.status.value = rec.status || 'done';
+        f.duration.value = rec.duration || '';
         document.getElementById('form-title').textContent = 'Edit entry';
         document.getElementById('btn-cancel').style.display = '';
       } else thinkEditId = null;
@@ -845,10 +993,10 @@
       var rec = {
         id: thinkEditId || uid(), date: f.date.value, activity: 'think',
         topic: f.topic.value.trim(), notes: f.notes.value.trim(),
-        status: f.status.value, createdAt: Date.now()
+        status: f.status.value, duration: Math.max(0, parseInt(f.duration.value, 10) || 0), createdAt: Date.now()
       };
       if (thinkEditId) { updateRecord(thinkEditId, rec); toast('Entry updated'); }
-      else { addRecord(rec); toast('Saved'); }
+      else { addRecord(rec); toast('Saved'); onTaskComplete('think'); }
       thinkEditId = null;
       LT.render();
     });
@@ -875,16 +1023,14 @@
 
     /* listen dashboard KPIs + volume chart */
     var liStats = computeStats(list);
-    var liAvg = avg(liStats.perAct.listen.scores);
     var liWeek = list.filter(function (r) { return r.date >= addDays(today, -6); }).reduce(function (a, r) { return a + (r.duration || 0); }, 0);
     var liDays = Object.keys(list.reduce(function (m, r) { m[r.date] = 1; return m; }, {})).length;
     wrap.appendChild(statGrid([
       { icon: '⏱️', label: 'Total time', value: fmtMinutes(liStats.perAct.listen.minutes), sub: list.length + ' sessions', color: '#6366f1' },
-      { icon: '⭐', label: 'Avg score', value: liAvg != null ? liAvg + '/100' : '—', sub: 'self-rated', color: '#10b981' },
       { icon: '📅', label: 'Last 7 days', value: fmtMinutes(liWeek), sub: 'this week', color: '#8b5cf6' },
       { icon: '🗓️', label: 'Active days', value: String(liDays), sub: 'days with listening', color: '#f59e0b' }
     ]));
-    var liChart = card('Listening volume', 'Minutes (bars) vs average self-score (line) — last 14 days');
+    var liChart = card('Listening volume', 'Minutes per day — last 14 days');
     var liCanvas = el('canvas', 'chart');
     liChart.appendChild(liCanvas);
     wrap.appendChild(liChart);
@@ -955,7 +1101,7 @@
           createdAt: Date.now()
         };
         if (listenEditId) { updateRecord(listenEditId, rec); toast('Session updated'); }
-        else { addRecord(rec); toast('Session saved'); }
+        else { addRecord(rec); toast('Session saved'); onTaskComplete('listen'); }
         listenEditId = null;
         LT.render();
       });
@@ -963,10 +1109,11 @@
     document.getElementById('btn-cancel').addEventListener('click', function () { listenEditId = null; LT.render(); });
 
     var liB = bucketize(list, 'day');
-    C.comboChart(liCanvas, {
+    C.barChart(liCanvas, {
       labels: liB.labels,
-      bars: { values: liB.buckets.map(function (x) { return x.minutes; }), color: '#6366f1' },
-      line: { values: liB.buckets.map(function (x) { return x.scores.length ? Math.round(x.scores.reduce(function (a, b) { return a + b; }, 0) / x.scores.length) : null; }), color: '#10b981', unit: ' score' }
+      values: liB.buckets.map(function (x) { return x.minutes; }),
+      color: '#6366f1',
+      format: function (v) { return fmtMinutes(v); }
     });
   }
 
@@ -1302,6 +1449,35 @@
     gCard.appendChild(el('div', 'form-actions', null)).appendChild(saveBtn);
     wrap.appendChild(gCard);
 
+    var durCard = el('div', 'card');
+    durCard.appendChild(el('h2', null, 'Task durations'));
+    durCard.appendChild(el('div', 'card-sub', 'How long each task is expected to take — shown as the ⏱ minutes indicator on its module.'));
+    var durGrid = el('div', 'set-grid');
+    var durations = getDurations();
+    var durKeys = [
+      { key: 'think', label: 'Think in English', icon: '💭' },
+      { key: 'phrases', label: 'Common Phrases', icon: '💬' }
+    ];
+    durKeys.forEach(function (dk) {
+      var df = el('div', 'set-field');
+      df.innerHTML = '<label>' + dk.icon + ' ' + esc(dk.label) + ' (min)<input type="number" min="0" max="600" data-dur="' + dk.key + '"></label>';
+      df.querySelector('input').value = durations[dk.key];
+      durGrid.appendChild(df);
+    });
+    var durSave = el('button', 'btn primary', '💾 Save durations');
+    durSave.addEventListener('click', function () {
+      var d2 = {};
+      durGrid.querySelectorAll('input').forEach(function (inp) {
+        d2[inp.getAttribute('data-dur')] = Math.max(0, parseInt(inp.value, 10) || 0);
+      });
+      saveDurations(d2);
+      toast('Durations saved');
+      LT.render();
+    });
+    durCard.appendChild(durGrid);
+    durCard.appendChild(el('div', 'form-actions', null)).appendChild(durSave);
+    wrap.appendChild(durCard);
+
     var dCard = el('div', 'card');
     dCard.appendChild(el('h2', null, 'Data'));
     dCard.appendChild(el('div', 'card-sub', 'Everything is stored locally in your browser. Export a backup, import one, or start fresh.'));
@@ -1331,7 +1507,7 @@
       var payload = {
         app: 'lifetrack-english', version: 2, exportedAt: new Date().toISOString(),
         records: getRecords(), reading: getReading(), writing: getWriting(),
-        phrases: getPhrases(), settings: getGoals()
+        phrases: getPhrases(), settings: { goals: getGoals(), durations: getDurations() }
       };
       var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       var a = document.createElement('a');
@@ -1355,7 +1531,10 @@
           var settings = (data && data.settings) || {};
           if (!window.confirm('Replace current data (' + getRecords().length + ' records, ' + getPhrases().length + ' phrases) with the imported backup?')) return;
           saveRecords(records); saveReading(reading); saveWriting(writing);
-          savePhrases(phrases); saveGoals(Object.assign({}, DEFAULT_GOALS, settings));
+          savePhrases(phrases);
+          var goalsIn = (settings.goals && typeof settings.goals === 'object') ? settings.goals : settings;
+          saveGoals(Object.assign({}, DEFAULT_GOALS, goalsIn));
+          if (settings.durations && typeof settings.durations === 'object') saveDurations(settings.durations);
 
           toast('Backup imported');
           LT.render();
@@ -1369,7 +1548,7 @@
     bClear.addEventListener('click', function () {
       if (!window.confirm('Delete ALL records, materials, phrases and settings? This cannot be undone.')) return;
       saveRecords([]); saveReading({ materials: [] }); saveWriting({ entries: [] });
-      savePhrases([]);
+      savePhrases([]); clearSettings();
       toast('All data cleared');
       LT.render();
     });
@@ -1587,7 +1766,8 @@
     getReading: getReading, saveReading: saveReading,
     getWriting: getWriting, saveWriting: saveWriting,
     getPhrases: getPhrases, savePhrases: savePhrases,
-    getGoals: getGoals, saveGoals: saveGoals,
+    getGoals: getGoals, saveGoals: saveGoals, getDurations: getDurations, saveDurations: saveDurations,
+    onTaskComplete: onTaskComplete,
     wordCount: wordCount, pageLabel: pageLabel,
     readingTotals: readingTotals, writingTotals: writingTotals,
     computeStats: computeStats, computeStreak: computeStreak,

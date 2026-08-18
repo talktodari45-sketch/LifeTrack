@@ -101,6 +101,7 @@ body {
 .page-head { margin-bottom: 18px; }
 .page-head h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; letter-spacing: -0.2px; }
 .page-head p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.page-head .head-dur { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--ink); }
 .head-row {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
@@ -590,3 +591,50 @@ table.records tbody tr:hover { background: #fafbff; }
 .read-mat-meta { padding: 0 16px 10px; color: #6b7280; font-size: 13px; }
 .ch-form { margin: 6px 12px 14px; padding: 12px 0 0; border-top: 1px dashed #e5e7eb; }
 .ch-form .media-attach { margin-top: 10px; }
+
+/* ---------- Celebration (task complete) ---------- */
+.celeb-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+.celeb-overlay.fade { opacity: 0; }
+.celeb-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 42%, rgba(99, 102, 241, 0.16), transparent 62%);
+  animation: celeb-glow-pulse 0.7s ease-out;
+}
+.celeb-overlay.big .celeb-glow {
+  background: radial-gradient(circle at 50% 42%, rgba(245, 158, 11, 0.26), rgba(99, 102, 241, 0.12) 55%, transparent 75%);
+}
+.celeb-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.celeb-card {
+  position: relative; z-index: 1;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px -18px rgba(23, 26, 43, 0.4);
+  padding: 26px 34px;
+  animation: celeb-pop 0.42s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.celeb-card.big { padding: 38px 50px; border-radius: 22px; }
+.celeb-emoji { font-size: 40px; line-height: 1; }
+.celeb-card.big .celeb-emoji { font-size: 54px; animation: celeb-bounce 0.9s ease infinite; }
+.celeb-title { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; margin-top: 10px; color: var(--ink); }
+.celeb-card.big .celeb-title { font-size: 30px; color: var(--brand-strong); }
+.celeb-sub { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.celeb-card.big .celeb-sub { font-size: 15px; }
+@keyframes celeb-pop {
+  from { opacity: 0; transform: scale(0.72) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes celeb-glow-pulse { from { opacity: 0; } to { opacity: 1; } }
+@keyframes celeb-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-6px) scale(1.06); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .celeb-card, .celeb-glow, .celeb-card.big .celeb-emoji { animation: none; }
+}

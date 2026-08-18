@@ -21,6 +21,12 @@
     var byDay = E.phrasesByDay();
     var todayCount = byDay[today] || 0;
     var total = E.phrasesTotal();
+    var dur = E.getDurations();
+    var minByDay = {};
+    list.forEach(function (p) {
+      var d = p.date || p.learned;
+      if (d && typeof p.duration === 'number') minByDay[d] = (minByDay[d] || 0) + p.duration;
+    });
 
     /* today's entry (for merging + photo) */
     var todayEntry = null;
@@ -37,7 +43,7 @@
 
     var wrap = el('div', 'view-body');
     var head = el('div', 'page-head');
-    head.innerHTML = '<h1>Common Phrases 💬</h1><p>Learn a few new phrases every day — log how many and snap a photo of them.</p>';
+    head.innerHTML = '<h1>Common Phrases 💬</h1><p class="head-dur">⏱️ ' + dur.phrases + ' min</p><p>Learn a few new phrases every day — log how many and snap a photo of them.</p>';
     wrap.appendChild(head);
 
     /* phrases dashboard KPIs + trend chart */
@@ -57,7 +63,7 @@
     /* today goal */
     var goalCard = el('div', 'card');
     goalCard.appendChild(el('h2', null, 'Today'));
-    goalCard.appendChild(el('div', 'card-sub', 'Learned ' + todayCount + ' of ' + goals.phrases + ' phrases today · ' + total + ' all time'));
+    goalCard.appendChild(el('div', 'card-sub', 'Learned ' + todayCount + ' of ' + goals.phrases + ' phrases today · ' + total + ' all time' + (minByDay[today] ? ' · ' + minByDay[today] + ' min today' : '')));
     goalCard.appendChild(E.ui.goalRow('💬', E.ACTIVITIES.phrases.color, 'Phrases learned today', todayCount, goals.phrases, 'phrases'));
     wrap.appendChild(goalCard);
 
@@ -67,6 +73,7 @@
       '<h2>Log phrases</h2><div class="card-sub">How many new phrases did you learn today?</div>' +
       '<div class="form-grid">' +
       '  <label>How many phrases<input name="count" type="number" min="1" max="50" value="1"></label>' +
+      '  <label>Minutes spent<input name="duration" type="number" min="0" max="600" placeholder="optional"></label>' +
       '</div>' +
       '<div class="form-actions"><button class="btn primary" type="submit">➕ Add to today</button></div>';
     wrap.appendChild(form);
@@ -85,7 +92,7 @@
       row.innerHTML =
         '<div class="recent-icon" style="background:#06b6d418">💬</div>' +
         '<div class="recent-main"><div class="recent-title">' + byDay[d] + ' phrase' + (byDay[d] === 1 ? '' : 's') + '</div>' +
-        '<div class="recent-sub">' + esc(fmtDate(d)) + '</div>' +
+        '<div class="recent-sub">' + esc(fmtDate(d)) + (minByDay[d] ? ' · ' + minByDay[d] + ' min spent' : '') + '</div>' +
         (ph ? '<img src="' + ph + '" alt="Phrase photo" style="max-width:160px;max-height:120px;border-radius:10px;border:1px solid var(--line);margin-top:6px;display:block">' : '') +
         '</div>' +
         '<div class="recent-side"><div class="v">' + (d === today ? 'today' : '') + '</div></div>';
@@ -102,6 +109,7 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var n = Math.max(1, parseInt(form.count.value, 10) || 1);
+      var mins = Math.max(0, parseInt(form.duration.value, 10) || 0);
       phPhoto.resolve(todayPhoto).then(function (photo) {
         var photos = photo ? [photo] : [];
         var list2 = E.getPhrases();
@@ -110,16 +118,18 @@
         if (entry) {
           entry.count += n;
           entry.photos = photos;
+          entry.duration = (entry.duration || 0) + mins;
         } else {
-          list2.push({ id: uid(), date: today, count: n, photos: photos });
+          list2.push({ id: uid(), date: today, count: n, photos: photos, duration: mins });
         }
         E.savePhrases(list2);
         E.addRecord({
-          date: today, activity: 'phrases', duration: 0,
+          date: today, activity: 'phrases', duration: mins,
           topic: 'Learned ' + n + ' phrase' + (n === 1 ? '' : 's'),
           notes: '',
           status: 'done', createdAt: Date.now()
         });
+        E.onTaskComplete('phrases');
         toast('Added ' + n + ' phrase' + (n === 1 ? '' : 's') + ' — ' + ((byDay[today] || 0) + n) + ' today');
         LT.render();
       });
